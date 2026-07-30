@@ -14,3 +14,5 @@ services:
         sync: false
       - key: BRIDGE_PASSWORD
         sync: false
+      - key: PYTHONUNBUFFERED
+        value: "1"

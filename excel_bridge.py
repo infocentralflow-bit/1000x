@@ -472,6 +472,15 @@ class Handler(BaseHTTPRequestHandler):
         self._cors()
         self.end_headers()
 
+    def do_HEAD(self):                                           # noqa: N802
+        # Cloud platforms probe liveness with HEAD, with no credentials —
+        # answer plainly so a health check never reads as "service down"
+        # just because it wasn't logged in. Carries no body either way.
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def _authorized(self):
         if not AUTH_ENABLED:
             return True
@@ -679,6 +688,11 @@ def main():
         print(f"  phone    : restart with  --lan  to allow access from your phone")
     print("  press Ctrl+C to stop")
     print("=" * 68)
+    # Cloud log pipes aren't a TTY, so stdout is fully block-buffered by
+    # default — without this, the whole banner above (including the login
+    # line) can sit unflushed indefinitely on a long-running server and
+    # never actually reach the platform's log viewer.
+    sys.stdout.flush()
 
     httpd = ThreadingHTTPServer((host, PORT), Handler)
     if "--no-open" not in args and not IS_CLOUD:
