@@ -223,6 +223,41 @@ most vivid red/green combinations in this lightness band do.
 pip install openpyxl pywin32
 ```
 
+## Running it always-on (no PC required)
+
+ngrok/`start_tunnel.bat` only work while your PC is on — that's what's actually running the
+bridge. To be reachable with your computer off, the app has to move to a cloud host, which
+can't run Excel: **the "Refresh from Excel" path is unavailable there — Alpha Vantage refresh
+still works normally.** The code already detects this environment (`$PORT` set) and adjusts —
+binds `0.0.0.0`, skips opening a local browser, skips the Excel attempt without complaint.
+
+This folder is already a git repo (`git log` to see the initial commit) with everything a
+host needs: `requirements.txt`, `render.yaml`. What's left needs your own accounts, so I
+can't do it from here:
+
+1. **Create a GitHub repo** (github.com → New repository, empty, no README/license). Then,
+   from this folder:
+   ```bash
+   git remote add origin https://github.com/<you>/<repo-name>.git
+   git branch -M main
+   git push -u origin main
+   ```
+2. **Sign up at [render.com](https://render.com)** (free, no card required for this tier) →
+   **New → Blueprint** → connect the GitHub repo you just pushed. Render reads `render.yaml`
+   automatically.
+3. Render will ask for two environment variables it can't guess — set them in its dashboard:
+   - `BRIDGE_USERNAME` — pick anything, e.g. `owner`
+   - `BRIDGE_PASSWORD` — a real password; this gates the whole site once it's public
+4. Deploy. Render gives you a permanent `https://<something>.onrender.com` URL — that one
+   doesn't change on restart, unlike ngrok's.
+
+Two things worth knowing about the free tier: it **spins down after 15 minutes idle** and
+takes ~30–60 seconds to wake back up on the next visit (a paid plan removes this); and saved
+projections written via the bridge (`saves/`) live on that ephemeral filesystem, wiped on
+every redeploy — the dashboard's own `localStorage` is unaffected, so nothing you've saved
+in-browser is at risk, but treat the cloud copy as not persistent server-side. Export/Import
+(in the Open modal) is the reliable way to move projections to or from the cloud instance.
+
 ## Notes
 
 - The bridge binds to `127.0.0.1` only — nothing is exposed to your network.
