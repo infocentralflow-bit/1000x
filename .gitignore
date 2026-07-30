@@ -1,0 +1,6 @@
+# Local-only — never commit credentials or personal saved data.
+.bridge_credentials.json
+saves/
+__pycache__/
+*.pyc
+.app-profile/

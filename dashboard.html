@@ -1,0 +1,2138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Projection Model — Scenario Terminal</title>
+<!-- PWA install support — only meaningful when served by excel_bridge.py
+     (http://127.0.0.1:8765/); harmless no-ops when opened as a bare file. -->
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="theme-color" content="#0b0b0d">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Projections">
+<style>
+/* ─────────────────────────────────────────────────────────────────────────────
+   Design tokens.
+   Series colors are a validated 3-slot categorical palette (dark mode, all-pairs,
+   surface #16161a): worst CVD ΔE 10.6 (deutan), worst normal-vision ΔE 22.7,
+   all ≥3:1 contrast. Do not re-step these without re-running the validator.
+   ───────────────────────────────────────────────────────────────────────────── */
+:root {
+  color-scheme: dark;
+
+  --plane:          #0b0b0d;
+  --surface-1:      #16161a;   /* card surface — the validated chart surface */
+  --surface-2:      #1d1d22;
+  --surface-3:      #24242b;
+
+  --text-primary:   #f5f5f2;
+  --text-secondary: #a9a8a1;
+  --text-muted:     #78776f;
+
+  --grid:           #2c2c2a;
+  --axis:           #383835;
+  --hairline:       rgba(255,255,255,0.08);
+
+  --gold:           #ffd966;
+  --gold-dim:       #b99a35;
+  --gold-glow:      rgba(255,217,102,0.14);
+
+  --base:           #3987e5;
+  --bear:           #d43232;
+  --bull:           #06b07a;
+
+  --good:           #0ca30c;
+  --warn:           #fab219;
+
+  --r-lg: 16px;
+  --r-md: 11px;
+  --r-sm: 7px;
+
+  --shadow-card: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.7);
+  --ease: cubic-bezier(.22,.61,.36,1);
+
+  --font: Inter, Poppins, "Segoe UI Variable Text", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background:
+    radial-gradient(1200px 600px at 12% -8%, rgba(255,217,102,.05), transparent 60%),
+    radial-gradient(900px 500px at 92% 0%, rgba(57,135,229,.06), transparent 55%),
+    var(--plane);
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+.app { max-width: 1320px; margin: 0 auto; padding: 22px 24px 64px; }
+
+/* ── Top bar ─────────────────────────────────────────────────────────────── */
+.topbar {
+  display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+  padding: 14px 18px; margin-bottom: 22px;
+  background: linear-gradient(180deg, var(--surface-2), var(--surface-1));
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-card);
+  position: sticky; top: 12px; z-index: 40;
+  backdrop-filter: blur(8px);
+}
+.brand { display: flex; align-items: center; gap: 11px; margin-right: auto; }
+.brand-mark {
+  width: 34px; height: 34px; flex: none; border-radius: 9px;
+  background: linear-gradient(145deg, var(--gold), #8f7526);
+  display: grid; place-items: center;
+  color: #221c05; font-weight: 800; font-size: 15px; letter-spacing: -.5px;
+  box-shadow: 0 0 0 1px rgba(255,217,102,.35), 0 4px 14px -4px rgba(255,217,102,.45);
+}
+.brand-text h1 { margin: 0; font-size: 15px; font-weight: 650; letter-spacing: -.2px; }
+.brand-text p  { margin: 1px 0 0; font-size: 11.5px; color: var(--text-muted); letter-spacing: .02em; }
+
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field label {
+  font-size: 10px; font-weight: 650; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--text-muted);
+}
+.input {
+  background: var(--plane);
+  border: 1px solid var(--hairline);
+  color: var(--text-primary);
+  border-radius: var(--r-sm);
+  padding: 7px 10px;
+  font: inherit; font-size: 13px;
+  transition: border-color .18s var(--ease), box-shadow .18s var(--ease), background .18s var(--ease);
+}
+.input:hover { border-color: rgba(255,255,255,.18); }
+.input:focus {
+  outline: none; border-color: var(--gold-dim);
+  box-shadow: 0 0 0 3px var(--gold-glow);
+  background: #08080a;
+}
+#ticker { width: 104px; text-transform: uppercase; letter-spacing: .08em; font-weight: 650; }
+#apikey { width: 168px; }
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 9px 16px; border-radius: var(--r-sm);
+  border: 1px solid transparent;
+  font: inherit; font-size: 13px; font-weight: 650;
+  cursor: pointer;
+  transition: transform .14s var(--ease), box-shadow .18s var(--ease),
+              background .18s var(--ease), border-color .18s var(--ease), opacity .18s;
+}
+.btn:active { transform: translateY(1px) scale(.995); }
+.btn-primary {
+  background: linear-gradient(180deg, var(--gold), #e0bb4c);
+  color: #201a04;
+  box-shadow: 0 1px 0 rgba(255,255,255,.25) inset, 0 6px 18px -8px rgba(255,217,102,.6);
+}
+.btn-primary:hover { box-shadow: 0 1px 0 rgba(255,255,255,.3) inset, 0 10px 26px -8px rgba(255,217,102,.75); }
+.btn-ghost {
+  background: var(--surface-3); color: var(--text-primary); border-color: var(--hairline);
+}
+.btn-ghost:hover { background: #2c2c34; border-color: rgba(255,255,255,.18); }
+.btn[disabled] { opacity: .5; cursor: not-allowed; transform: none; }
+
+.spinner {
+  width: 13px; height: 13px; flex: none;
+  border: 2px solid rgba(32,26,4,.3); border-top-color: #201a04;
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+  display: none;
+}
+.is-busy .spinner { display: block; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Source badge ────────────────────────────────────────────────────────── */
+.badge {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 5px 11px; border-radius: 999px;
+  font-size: 11.5px; font-weight: 650; letter-spacing: .01em;
+  border: 1px solid transparent; white-space: nowrap;
+}
+.badge .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.badge-sample   { background: rgba(250,178,25,.12); color: #f0be4e; border-color: rgba(250,178,25,.32); }
+.badge-sample .dot   { background: var(--warn); }
+.badge-workbook { background: rgba(6,176,122,.12); color: #35c294; border-color: rgba(6,176,122,.3); }
+.badge-workbook .dot { background: var(--bull); }
+.badge-manual   { background: rgba(57,135,229,.12); color: #6ba6ee; border-color: rgba(57,135,229,.3); }
+.badge-manual .dot   { background: var(--base); }
+
+/* ── Notice strip ────────────────────────────────────────────────────────── */
+.notice {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 13px 16px; margin-bottom: 20px;
+  border-radius: var(--r-md);
+  border: 1px solid rgba(250,178,25,.28);
+  background: linear-gradient(180deg, rgba(250,178,25,.07), rgba(250,178,25,.03));
+  font-size: 13px; color: #e8d9b0;
+  animation: rise .4s var(--ease) both;
+}
+.notice.hidden { display: none; }
+.notice svg { flex: none; margin-top: 1px; }
+.notice strong { color: #f6dfa6; font-weight: 650; }
+.notice-actions { margin-left: auto; display: flex; gap: 8px; flex: none; }
+
+/* ── Section heads ───────────────────────────────────────────────────────── */
+.section-head {
+  display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+  margin: 30px 0 13px;
+}
+.section-head h2 {
+  margin: 0; font-size: 12px; font-weight: 700;
+  letter-spacing: .13em; text-transform: uppercase; color: var(--text-secondary);
+}
+.section-head .rule { flex: 1; height: 1px; background: var(--hairline); min-width: 24px; }
+.section-head .hint { font-size: 11.5px; color: var(--text-muted); }
+
+/* ── KPI cards ───────────────────────────────────────────────────────────── */
+.kpi-grid {
+  display: grid; gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(196px, 1fr));
+}
+.kpi {
+  position: relative; overflow: hidden;
+  padding: 16px 17px 15px;
+  background: linear-gradient(180deg, var(--surface-2), var(--surface-1));
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-card);
+  transition: transform .22s var(--ease), border-color .22s var(--ease), box-shadow .22s var(--ease);
+  animation: rise .45s var(--ease) both;
+}
+.kpi:hover {
+  transform: translateY(-3px);
+  border-color: rgba(255,217,102,.3);
+  box-shadow: 0 1px 2px rgba(0,0,0,.4), 0 16px 34px -16px rgba(0,0,0,.85), 0 0 0 1px rgba(255,217,102,.06);
+}
+.kpi::after {
+  content: ""; position: absolute; inset: 0 0 auto; height: 2px;
+  background: linear-gradient(90deg, var(--gold), transparent 72%);
+  opacity: .5; transition: opacity .22s var(--ease);
+}
+.kpi:hover::after { opacity: 1; }
+.kpi-label {
+  font-size: 10.5px; font-weight: 650; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--text-muted); margin-bottom: 9px;
+}
+.kpi-value {
+  font-size: 27px; font-weight: 680; letter-spacing: -.9px; line-height: 1.08;
+  color: var(--text-primary);
+  /* proportional figures on purpose — tabular-nums reads loose at display size */
+}
+.kpi-value.is-empty { color: var(--text-muted); font-weight: 500; letter-spacing: -.2px; }
+.kpi-unit { font-size: 12px; color: var(--text-muted); margin-top: 5px; letter-spacing: .01em; }
+
+/* ── Editable base-year (2026) inputs, living inside the KPI cards ───────── */
+.kpi-input {
+  display: block; width: 100%;
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: 1px dashed rgba(255,255,255,.26);
+  border-radius: 6px 6px 3px 3px;
+  padding: 1px 6px 3px;
+  margin: -1px -6px 0;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 27px; font-weight: 680; letter-spacing: -.9px; line-height: 1.08;
+  transition: border-color .18s var(--ease), background .18s var(--ease),
+              box-shadow .18s var(--ease), color .18s var(--ease);
+}
+.kpi-input::-webkit-outer-spin-button,
+.kpi-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.kpi-input[type=number] { -moz-appearance: textfield; appearance: textfield; }
+.kpi-input:hover:not([readonly]) { border-bottom-color: rgba(255,255,255,.5); background: rgba(255,255,255,.03); }
+.kpi-input:focus {
+  outline: none;
+  border-color: var(--gold-dim); border-bottom-style: solid;
+  background: #08080a;
+  box-shadow: 0 0 0 3px var(--gold-glow);
+}
+.kpi-input[readonly] {
+  border-bottom-color: transparent; cursor: default;
+  color: var(--gold);
+}
+.kpi-input[readonly]:hover { background: transparent; }
+
+/* locked card: gold ring + padlock, so 2026 reads as "settled" */
+.kpi.locked { border-color: rgba(255,217,102,.34); background: linear-gradient(180deg, #1e1b12, #17150f); }
+.kpi.locked::after { opacity: 1; }
+.kpi .lock-glyph {
+  position: absolute; top: 12px; right: 12px;
+  opacity: 0; transform: scale(.8);
+  transition: opacity .22s var(--ease), transform .22s var(--ease);
+  color: var(--gold);
+}
+.kpi.locked .lock-glyph { opacity: .85; transform: scale(1); }
+.kpi.derived .kpi-value { color: var(--gold); }
+
+/* ── Lock button ─────────────────────────────────────────────────────────── */
+.lock-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 13px; border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.16);
+  background: var(--surface-2); color: var(--text-secondary);
+  font: inherit; font-size: 12px; font-weight: 650;
+  cursor: pointer;
+  transition: all .2s var(--ease);
+}
+.lock-btn:hover { border-color: rgba(255,255,255,.3); color: var(--text-primary); transform: translateY(-1px); }
+.lock-btn svg { flex: none; transition: transform .25s var(--ease); }
+.lock-btn[aria-pressed="true"] {
+  background: linear-gradient(180deg, rgba(255,217,102,.2), rgba(255,217,102,.09));
+  border-color: rgba(255,217,102,.45);
+  color: var(--gold);
+  box-shadow: 0 0 0 3px rgba(255,217,102,.07);
+}
+.lock-btn:focus-visible { outline: 2px solid var(--gold-dim); outline-offset: 2px; }
+.lock-btn .shackle { transition: transform .25s var(--ease); transform-origin: center bottom; }
+.lock-btn[aria-pressed="false"] .shackle { transform: translateX(3px) translateY(-1.5px); }
+
+/* ── Project name / Save / Open ───────────────────────────────────────────── */
+.project-field { min-width: 148px; }
+.project-name-btn {
+  display: inline-flex; align-items: center; gap: 7px;
+  background: var(--plane);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-sm);
+  padding: 7px 10px;
+  font: inherit; font-size: 13px; font-weight: 650; color: var(--text-primary);
+  cursor: pointer; max-width: 220px;
+  transition: border-color .18s var(--ease), background .18s var(--ease);
+}
+.project-name-btn:hover { border-color: rgba(255,255,255,.22); background: #08080a; }
+.project-name-btn:focus-visible { outline: 2px solid var(--gold-dim); outline-offset: 1px; }
+.project-name-btn .name-text {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 168px;
+}
+.project-name-btn .pencil { flex: none; opacity: .55; }
+.dirty-dot {
+  width: 7px; height: 7px; border-radius: 50%; flex: none;
+  background: var(--gold); box-shadow: 0 0 0 3px var(--gold-glow);
+}
+.icon-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  width: 36px; height: 36px; border-radius: var(--r-sm);
+  border: 1px solid var(--hairline); background: var(--surface-2); color: var(--text-secondary);
+  cursor: pointer; transition: all .18s var(--ease);
+}
+.icon-btn:hover { color: var(--text-primary); border-color: rgba(255,255,255,.24); transform: translateY(-1px); }
+.icon-btn:focus-visible { outline: 2px solid var(--gold-dim); outline-offset: 2px; }
+.icon-btn.wide { width: auto; padding: 0 13px; font-size: 12.5px; font-weight: 650; }
+.btn-cluster { display: inline-flex; gap: 8px; align-items: center; }
+
+/* ── Modals (Save As / Rename / Open Projections) ─────────────────────────── */
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(5,5,6,.66); backdrop-filter: blur(3px);
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+  opacity: 0; pointer-events: none; transition: opacity .18s var(--ease);
+}
+.modal-overlay.open { opacity: 1; pointer-events: auto; }
+.modal-card {
+  width: 100%; max-width: 420px;
+  background: linear-gradient(180deg, var(--surface-2), var(--surface-1));
+  border: 1px solid var(--hairline); border-radius: var(--r-lg);
+  box-shadow: 0 24px 70px -20px rgba(0,0,0,.85), 0 1px 2px rgba(0,0,0,.5);
+  transform: translateY(10px) scale(.98); transition: transform .2s var(--ease);
+  max-height: min(78vh, 640px); display: flex; flex-direction: column; overflow: hidden;
+}
+.modal-overlay.open .modal-card { transform: none; }
+.modal-card.wide { max-width: 540px; }
+.modal-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 16px 18px; border-bottom: 1px solid var(--hairline); flex: none;
+}
+.modal-head h3 { margin: 0; font-size: 15px; font-weight: 650; }
+.modal-close {
+  margin-left: auto; width: 28px; height: 28px; border-radius: 8px;
+  border: none; background: transparent; color: var(--text-muted);
+  cursor: pointer; display: grid; place-items: center; transition: all .15s var(--ease);
+}
+.modal-close:hover { background: var(--surface-3); color: var(--text-primary); }
+.modal-body { padding: 18px; overflow-y: auto; }
+.modal-foot { padding: 14px 18px; border-top: 1px solid var(--hairline); flex: none;
+  display: flex; align-items: center; gap: 10px; }
+.modal-input {
+  width: 100%; background: var(--plane); border: 1px solid var(--hairline);
+  border-radius: var(--r-sm); padding: 10px 12px; color: var(--text-primary);
+  font: inherit; font-size: 14px; transition: border-color .18s var(--ease), box-shadow .18s var(--ease);
+}
+.modal-input:focus {
+  outline: none; border-color: var(--gold-dim); box-shadow: 0 0 0 3px var(--gold-glow); background: #08080a;
+}
+.modal-hint { font-size: 11.5px; color: var(--text-muted); margin-top: 8px; }
+
+.project-list { display: flex; flex-direction: column; gap: 8px; }
+.project-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 11px 12px; border-radius: var(--r-md);
+  border: 1px solid var(--hairline); background: var(--surface-1);
+  transition: border-color .16s var(--ease), background .16s var(--ease);
+}
+.project-row:hover { border-color: rgba(255,217,102,.28); background: #1a1a20; }
+.project-row.is-active { border-color: rgba(255,217,102,.45); background: rgba(255,217,102,.05); }
+.project-row-main { flex: 1; min-width: 0; text-align: left; background: none; border: none; cursor: pointer;
+  color: inherit; font: inherit; padding: 0; }
+.project-row-name { font-size: 13.5px; font-weight: 650; color: var(--text-primary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; align-items: center; gap: 7px; }
+.project-row-name .active-pip { color: var(--gold); font-size: 10px; }
+.project-row-meta { font-size: 11.5px; color: var(--text-muted); margin-top: 3px; }
+.project-row-actions { display: flex; gap: 5px; flex: none; }
+.project-row-actions .icon-btn { width: 30px; height: 30px; }
+.project-empty { text-align: center; padding: 30px 10px; color: var(--text-muted); font-size: 13px; }
+.modal-tabs { display: flex; gap: 4px; }
+.modal-tabs button {
+  appearance: none; border: 1px solid var(--hairline); background: var(--surface-2);
+  color: var(--text-secondary); font: inherit; font-size: 12px; font-weight: 650;
+  padding: 7px 12px; border-radius: 8px; cursor: pointer; transition: all .15s var(--ease);
+}
+.modal-tabs button:hover { color: var(--text-primary); }
+.modal-tabs button.active {
+  background: linear-gradient(180deg, rgba(255,217,102,.2), rgba(255,217,102,.1));
+  border-color: rgba(255,217,102,.4); color: var(--gold);
+}
+.toast-flash {
+  position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%) translateY(8px);
+  background: rgba(10,10,12,.97); border: 1px solid rgba(6,176,122,.4);
+  color: #7fe0bd; padding: 10px 18px; border-radius: 999px; font-size: 13px; font-weight: 650;
+  box-shadow: 0 14px 34px -12px rgba(0,0,0,.8); z-index: 120;
+  opacity: 0; pointer-events: none; transition: opacity .2s var(--ease), transform .2s var(--ease);
+}
+.toast-flash.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* ── Locked 2026 column in the scenario tables ──────────────────────────── */
+th.year0, td.year0 { transition: opacity .3s var(--ease), background .3s var(--ease); }
+[data-locked="true"] td.year0 { opacity: .42; }
+[data-locked="true"] th.year0 { opacity: .5; }
+[data-locked="true"] table.model tbody tr:hover td.year0 { opacity: .72; }
+[data-locked="false"] td.year0.needs-input { background: rgba(255,217,102,.055); }
+th.year0 .hdr-lock { margin-left: 5px; opacity: .8; vertical-align: -1px; }
+.focus-hint {
+  font-size: 11px; color: var(--gold-dim); font-weight: 600;
+  letter-spacing: .02em;
+}
+
+/* ── Cards ───────────────────────────────────────────────────────────────── */
+.card {
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+  animation: rise .5s var(--ease) both;
+}
+.card-head {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--hairline);
+}
+.card-head h3 { margin: 0; font-size: 14px; font-weight: 650; letter-spacing: -.1px; }
+.card-head .sub { font-size: 11.5px; color: var(--text-muted); margin-left: auto; }
+.card-body { padding: 16px 18px 18px; }
+
+/* scenario accent bar */
+.scenario-card { margin-bottom: 16px; }
+.scenario-card .card-head { border-left: 3px solid var(--accent); }
+.scenario-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 13px; font-weight: 700; letter-spacing: .04em;
+}
+.scenario-chip .swatch {
+  width: 11px; height: 11px; border-radius: 3px; flex: none;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--surface-1), 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+/* ── Control row (above the chart it scopes) ─────────────────────────────── */
+.controls {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  margin: 30px 0 13px;
+}
+.seg {
+  display: inline-flex; padding: 3px; gap: 2px;
+  background: var(--surface-1); border: 1px solid var(--hairline);
+  border-radius: 9px;
+}
+.seg button {
+  appearance: none; border: 0; background: transparent;
+  color: var(--text-secondary);
+  font: inherit; font-size: 12.5px; font-weight: 600;
+  padding: 6px 13px; border-radius: 7px; cursor: pointer;
+  transition: background .18s var(--ease), color .18s var(--ease);
+}
+.seg button:hover { color: var(--text-primary); background: rgba(255,255,255,.05); }
+.seg button[aria-pressed="true"] {
+  background: linear-gradient(180deg, rgba(255,217,102,.2), rgba(255,217,102,.1));
+  color: var(--gold);
+  box-shadow: inset 0 0 0 1px rgba(255,217,102,.3);
+}
+.seg button:focus-visible { outline: 2px solid var(--gold-dim); outline-offset: 1px; }
+
+/* ── Chart ───────────────────────────────────────────────────────────────── */
+.chart-wrap { position: relative; overflow-x: auto; }
+#chart { display: block; width: 100%; height: auto; touch-action: none; }
+/* Below this width the 920-unit viewBox would squash axis labels to ~4px.
+   Hold a readable minimum and let the chart scroll inside its own card
+   instead — the page body never scrolls sideways. */
+@media (max-width: 760px) {
+  #chart { min-width: 660px; }
+}
+#chart:focus-visible { outline: 2px solid var(--gold-dim); outline-offset: 3px; border-radius: 8px; }
+.chart-legend {
+  display: flex; gap: 18px; flex-wrap: wrap;
+  padding: 0 18px 14px;
+}
+.legend-item { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-secondary); }
+.legend-item .swatch { width: 20px; height: 3px; border-radius: 2px; flex: none; }
+.legend-item .marker {
+  width: 9px; height: 9px; border-radius: 50%; flex: none;
+  box-shadow: 0 0 0 2px var(--surface-1);
+}
+
+.tooltip {
+  position: absolute; pointer-events: none; z-index: 20;
+  min-width: 178px;
+  padding: 10px 12px;
+  background: rgba(10,10,12,.97);
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: var(--r-sm);
+  box-shadow: 0 12px 32px -10px rgba(0,0,0,.9);
+  font-size: 12.5px;
+  opacity: 0; transform: translateY(3px);
+  transition: opacity .13s var(--ease), transform .13s var(--ease);
+}
+.tooltip.show { opacity: 1; transform: translateY(0); }
+.tooltip .tt-year {
+  font-weight: 700; font-size: 12px; letter-spacing: .09em;
+  color: var(--text-muted); text-transform: uppercase;
+  padding-bottom: 7px; margin-bottom: 7px;
+  border-bottom: 1px solid rgba(255,255,255,.1);
+}
+.tooltip .tt-row { display: flex; align-items: center; gap: 9px; padding: 3px 0; }
+.tooltip .tt-row .swatch { width: 9px; height: 9px; border-radius: 2.5px; flex: none; }
+.tooltip .tt-row .name { color: var(--text-secondary); }
+.tooltip .tt-row .val { margin-left: auto; font-weight: 650; font-variant-numeric: tabular-nums; color: var(--text-primary); }
+
+/* ── Tables ──────────────────────────────────────────────────────────────── */
+.table-scroll { overflow-x: auto; }
+table.model { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+table.model th, table.model td { padding: 8px 11px; text-align: right; white-space: nowrap; }
+table.model thead th {
+  font-size: 10.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--hairline);
+  font-variant-numeric: tabular-nums;
+}
+table.model tbody th {
+  text-align: left; font-weight: 550; color: var(--text-secondary);
+  position: sticky; left: 0; background: var(--surface-1);
+  min-width: 208px;
+}
+table.model td { font-variant-numeric: tabular-nums; color: var(--text-primary); }
+table.model tbody tr { transition: background .15s var(--ease); }
+table.model tbody tr:hover { background: rgba(255,255,255,.028); }
+table.model tbody tr:hover th { background: #1a1a1f; }
+table.model tr.row-sep td, table.model tr.row-sep th { border-top: 1px solid var(--hairline); }
+
+td.calc { color: var(--gold); font-weight: 600; }        /* gold = calculated, per Excel legend */
+td.link { color: #7fd9b8; font-weight: 600; }            /* green = linked from Company Inputs */
+td.dash { color: var(--text-muted); text-align: center; }
+td.cellinput { padding: 4px 6px; }
+.cell-edit {
+  width: 88px; padding: 5px 7px;
+  background: #0e0e11; border: 1px dashed rgba(255,255,255,.2);
+  color: var(--text-primary); border-radius: 5px;
+  font: inherit; font-size: 12.5px; text-align: right;
+  font-variant-numeric: tabular-nums;
+  transition: border-color .16s var(--ease), box-shadow .16s var(--ease), background .16s var(--ease);
+}
+.cell-edit:hover { border-color: rgba(255,255,255,.34); }
+.cell-edit:focus {
+  outline: none; border-style: solid; border-color: var(--gold-dim);
+  box-shadow: 0 0 0 3px var(--gold-glow); background: #08080a;
+}
+.cell-edit.flash { animation: flash .5s var(--ease); }
+@keyframes flash { 0% { background: rgba(255,217,102,.22); } 100% { background: #08080a; } }
+
+.rowlabel-note { font-size: 10.5px; color: var(--text-muted); font-weight: 400; display: block; }
+
+/* ── Summary table ───────────────────────────────────────────────────────── */
+table.summary { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+table.summary th, table.summary td { padding: 10px 13px; text-align: right; white-space: nowrap; }
+table.summary thead th {
+  font-size: 10.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--text-muted); border-bottom: 1px solid var(--hairline);
+}
+table.summary thead th:first-child, table.summary tbody th { text-align: left; }
+table.summary tbody th { font-weight: 700; font-size: 12.5px; letter-spacing: .03em; }
+table.summary td { font-variant-numeric: tabular-nums; font-weight: 600; }
+table.summary tbody tr { transition: background .15s var(--ease); }
+table.summary tbody tr:hover { background: rgba(255,255,255,.03); }
+table.summary .cagr { color: var(--gold); }
+
+footer.legal {
+  margin-top: 34px; padding-top: 18px;
+  border-top: 1px solid var(--hairline);
+  font-size: 11.5px; color: var(--text-muted); line-height: 1.65;
+}
+footer.legal code {
+  background: var(--surface-2); padding: 1px 5px; border-radius: 4px;
+  font-size: 11px; color: #cfcec6;
+}
+
+@keyframes rise { from { opacity: 0; transform: translateY(9px); } to { opacity: 1; transform: none; } }
+.kpi:nth-child(2) { animation-delay: .04s; }
+.kpi:nth-child(3) { animation-delay: .08s; }
+.kpi:nth-child(4) { animation-delay: .12s; }
+.kpi:nth-child(5) { animation-delay: .16s; }
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
+@media (max-width: 720px) {
+  .app { padding: 14px 13px 48px; }
+  .topbar { position: static; }
+  .kpi-value { font-size: 23px; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">FP</div>
+      <div class="brand-text">
+        <h1>Projection Model</h1>
+        <p>Scenario terminal · 2026–2030</p>
+      </div>
+    </div>
+
+    <div class="field project-field">
+      <label for="btnProjectName">Projection</label>
+      <button id="btnProjectName" class="project-name-btn" title="Click to rename">
+        <span class="name-text" id="projectNameText">Untitled</span>
+        <span id="dirtyDot" class="dirty-dot" hidden></span>
+        <svg class="pencil" width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M11.3 2.3a1.5 1.5 0 0 1 2.1 2.1L5.5 12.3l-3 .7.7-3 8.1-7.7Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="btn-cluster">
+      <button id="btnNew" class="icon-btn" title="New blank projection (Ctrl+Alt+N)" aria-label="New projection">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M4 2h5l3 3v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+          <path d="M9 2v3h3" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+          <path d="M8 8.2v4M6 10.2h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <button id="btnSave" class="icon-btn" title="Save (Ctrl+S)" aria-label="Save">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M2.5 2.5h9l2 2v9a1 1 0 0 1-1 1h-10a1 1 0 0 1-1-1v-10a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+          <path d="M4.5 2.5v3.5h5.5v-3.5M4.5 14v-4.5h7V14" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+        </svg>
+      </button>
+      <button id="btnOpen" class="icon-btn" title="Open a saved projection" aria-label="Open">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M2 4.5a1 1 0 0 1 1-1h3.2l1.3 1.5H13a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-8Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="field">
+      <label for="ticker">Ticker</label>
+      <input id="ticker" class="input" value="AAPL" autocomplete="off" spellcheck="false" aria-label="Stock ticker">
+    </div>
+
+    <div class="field">
+      <label for="apikey">Alpha Vantage key</label>
+      <input id="apikey" class="input" type="password" placeholder="optional" autocomplete="off" aria-label="Alpha Vantage API key">
+    </div>
+
+    <span id="srcBadge" class="badge badge-sample"><span class="dot"></span><span id="srcText">Sample data</span></span>
+
+    <button id="btnRefresh" class="btn btn-primary">
+      <span class="spinner" aria-hidden="true"></span>
+      <span id="refreshLabel">Refresh</span>
+    </button>
+  </header>
+
+  <div id="notice" class="notice">
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <circle cx="8" cy="8" r="7" stroke="#f0be4e" stroke-width="1.4"/>
+      <path d="M8 4.6v4.2M8 11.2v.6" stroke="#f0be4e" stroke-width="1.5" stroke-linecap="round"/>
+    </svg>
+    <div id="noticeText">
+      <strong>Showing sample figures.</strong> These are illustrative, not from your workbook.
+      Start the Excel bridge to pull the real Company Inputs block, or type over any value below.
+    </div>
+    <div class="notice-actions">
+      <button id="btnDismiss" class="btn btn-ghost" style="padding:6px 12px;font-size:12px">Dismiss</button>
+    </div>
+  </div>
+
+  <!-- ── KPI row ───────────────────────────────────────────────────────── -->
+  <div class="section-head">
+    <h2>Company Inputs</h2>
+    <span class="hint" id="kpiHint">Base year 2026 · type over any value</span>
+    <span class="rule"></span>
+    <button id="btnLock" class="lock-btn" aria-pressed="false"
+            title="Lock the 2026 base year so you can focus on 2027–2030">
+      <svg width="13" height="14" viewBox="0 0 14 15" fill="none" aria-hidden="true">
+        <path class="shackle" d="M4 6V4.2a3 3 0 0 1 6 0V6" stroke="currentColor"
+              stroke-width="1.6" stroke-linecap="round"/>
+        <rect x="2" y="6" width="10" height="7.5" rx="1.8" stroke="currentColor" stroke-width="1.6"/>
+      </svg>
+      <span id="lockLabel">Lock 2026</span>
+    </button>
+    <button id="btnReset" class="lock-btn" title="Clear saved values on this device">Reset</button>
+  </div>
+  <div class="kpi-grid" id="kpiGrid"></div>
+
+  <!-- ── Control row: scopes the chart below it ───────────────────────── -->
+  <div class="controls">
+    <div class="section-head" style="margin:0">
+      <h2>Projection</h2>
+    </div>
+    <div class="seg" id="metricSeg" role="group" aria-label="Chart metric">
+      <button data-metric="revenue"   aria-pressed="true">Revenue</button>
+      <button data-metric="netIncome" aria-pressed="false">Net Income</button>
+      <button data-metric="eps"       aria-pressed="false">EPS</button>
+      <button data-metric="priceMid"  aria-pressed="false">Share Price</button>
+    </div>
+    <span class="hint" style="color:var(--text-muted);font-size:11.5px">
+      Hover or focus the chart and use ← → to read values
+    </span>
+  </div>
+
+  <div class="card">
+    <div class="chart-wrap">
+      <svg id="chart" viewBox="0 0 920 340" role="img" aria-labelledby="chartTitle chartDesc" tabindex="0">
+        <title id="chartTitle">Scenario projection chart</title>
+        <desc id="chartDesc">Base, bear and bull projections from 2026 to 2030. Full values are in the scenario tables below.</desc>
+      </svg>
+      <div id="tooltip" class="tooltip" role="status" aria-live="polite"></div>
+    </div>
+    <div class="chart-legend" id="chartLegend"></div>
+  </div>
+
+  <!-- ── Summary ─────────────────────────────────────────────────────── -->
+  <div class="section-head">
+    <h2>2030 Scenario Summary</h2>
+    <span class="rule"></span>
+  </div>
+  <div class="card">
+    <div class="card-body" style="padding:4px 6px 6px">
+      <div class="table-scroll">
+        <table class="summary" id="summaryTable"></table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Scenario tables ─────────────────────────────────────────────── -->
+  <div class="section-head">
+    <h2>Scenario Detail</h2>
+    <span class="hint">Dashed cells are editable assumptions — every gold value recalculates live</span>
+    <span class="rule"></span>
+  </div>
+  <div id="scenarios"></div>
+
+  <footer class="legal">
+    <strong style="color:var(--text-secondary)">Formula parity with the workbook.</strong>
+    Revenue<sub>t</sub> = Revenue<sub>t−1</sub> × (1 + growth<sub>t</sub>) ·
+    Net&nbsp;Income<sub>t</sub> = NI<sub>t−1</sub> × (1 + NI&nbsp;growth<sub>t</sub>) ·
+    Margin = NI ÷ Revenue ·
+    EPS<sub>2026</sub> is the reported figure from Company Inputs, EPS<sub>t&gt;2026</sub> = NI<sub>t</sub> ÷ shares ·
+    Share&nbsp;Price = EPS × P/E ·
+    CAGR = (final ÷ initial)<sup>1/4</sup> − 1.
+    Zero-denominator cases resolve to 0, matching the workbook's <code>IFERROR</code> wrappers.
+    <br><br>
+    Revenue and Net Income are in <strong>$ millions</strong>; EPS and share prices in <strong>$ per share</strong>.
+    The workbook leaves 2028–2030 growth and P/E blank as <em>ENTER VALUES</em> placeholders; this app carries the
+    prior year's assumption forward so the projection is never dead, and every carried cell is editable above.
+    Share counts are held flat across all five years, as in the workbook.
+  </footer>
+</div>
+
+<!-- ── Save As / Rename modal ─────────────────────────────────────────────── -->
+<div id="saveModal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="saveModalTitle">
+  <div class="modal-card">
+    <div class="modal-head">
+      <h3 id="saveModalTitle">Save projection</h3>
+      <button class="modal-close" data-close-modal aria-label="Close">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <input id="saveNameInput" class="modal-input" type="text" maxlength="60" placeholder="e.g. AAPL — Base Case Q3" autocomplete="off">
+      <div class="modal-hint" id="saveModalHint">Saved on this device, under whatever name you give it — come back to it anytime from Open.</div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" data-close-modal style="margin-left:auto">Cancel</button>
+      <button id="saveModalConfirm" class="btn btn-primary">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Open Projections modal ─────────────────────────────────────────────── -->
+<div id="openModal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="openModalTitle">
+  <div class="modal-card wide">
+    <div class="modal-head">
+      <h3 id="openModalTitle">Saved projections</h3>
+      <button class="modal-close" data-close-modal aria-label="Close">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div id="projectList" class="project-list"></div>
+    </div>
+    <div class="modal-foot">
+      <input id="importFile" type="file" accept="application/json" hidden>
+      <button id="btnImport" class="btn btn-ghost" title="Load projections from a .json backup file">Import…</button>
+      <button id="btnExport" class="btn btn-ghost" title="Download all saved projections as a .json backup file" style="margin-left:auto">Export all</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast-flash" role="status" aria-live="polite"></div>
+
+<script>
+"use strict";
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Model — a direct transcription of the workbook's formulas.
+   ─────────────────────────────────────────────────────────────────────────── */
+const YEARS = [2026, 2027, 2028, 2029, 2030];
+const NY = YEARS.length;
+
+const SERIES = {
+  base: { key: "base", label: "Base Case", color: "#3987e5" },
+  bear: { key: "bear", label: "Bear Case", color: "#d43232" },
+  bull: { key: "bull", label: "Bull Case", color: "#06b07a" },
+};
+
+/* Company Inputs — mirrors the named ranges Co_Revenue / Co_NetIncome /
+   Co_EPS / Co_Shares on the Projection Model sheet. */
+let company = { ticker: "AAPL", revenue: 0, netIncome: 0, eps: 0, shares: 0 };
+
+/* Sample values so the dashboard is legible before the bridge is wired up.
+   Clearly badged as sample until real data replaces it. */
+const SAMPLE = { ticker: "AAPL", revenue: 391035, netIncome: 93736, eps: 6.11, shares: 15334.1 };
+
+/* Per-scenario assumptions. Defaults match the workbook exactly:
+   base 10% / 20x-30x, bear 3% / 8x-12x, bull 18% / 20x-28x. */
+function mkAssumptions(g, peLo, peHi) {
+  return {
+    revGrowth: Array(NY).fill(g),   // index 0 unused (base year is an input)
+    niGrowth:  Array(NY).fill(g),
+    peLow:     Array(NY).fill(peLo),
+    peHigh:    Array(NY).fill(peHi),
+  };
+}
+const assumptions = {
+  base: mkAssumptions(0.10, 20, 30),
+  bear: mkAssumptions(0.03,  8, 12),
+  bull: mkAssumptions(0.18, 20, 28),
+};
+
+let dataSource = "sample";   // sample | workbook | manual | api
+let bridgeUp = false;
+let metric = "revenue";
+let hoverIdx = null;
+
+const safeDiv = (a, b) => (b === 0 || !isFinite(b) ? 0 : a / b);
+
+/** Compute one scenario exactly as the sheet does. */
+function computeScenario(key) {
+  const a = assumptions[key];
+  const revenue = [], netIncome = [], margin = [], shares = [], eps = [],
+        priceLow = [], priceHigh = [], priceMid = [];
+
+  for (let t = 0; t < NY; t++) {
+    // C25 = Co_Revenue ; D25 = C25*(1+D26)
+    revenue[t]   = t === 0 ? company.revenue   : revenue[t - 1]   * (1 + a.revGrowth[t]);
+    // C27 = Co_NetIncome ; D27 = C27*(1+D28)
+    netIncome[t] = t === 0 ? company.netIncome : netIncome[t - 1] * (1 + a.niGrowth[t]);
+    // C29 = IFERROR(C27/C25,0)
+    margin[t]    = safeDiv(netIncome[t], revenue[t]);
+    // C30 = Co_Shares ; D30 = C30  (flat across years)
+    shares[t]    = company.shares;
+    // C31 = Co_EPS (reported) ; D31 = IFERROR(D27/D30,0)
+    eps[t]       = t === 0 ? company.eps : safeDiv(netIncome[t], shares[t]);
+    // C34 = C31*C32 ; C35 = C31*C33
+    priceLow[t]  = eps[t] * a.peLow[t];
+    priceHigh[t] = eps[t] * a.peHigh[t];
+    priceMid[t]  = (priceLow[t] + priceHigh[t]) / 2;
+  }
+  // G36 = IFERROR((G34/C34)^(1/4)-1,0)
+  const cagr = (arr) => (arr[0] > 0 && arr[NY - 1] > 0
+    ? Math.pow(arr[NY - 1] / arr[0], 1 / (NY - 1)) - 1 : 0);
+
+  return { revenue, netIncome, margin, shares, eps, priceLow, priceHigh, priceMid,
+           cagrLow: cagr(priceLow), cagrHigh: cagr(priceHigh) };
+}
+
+let results = {};
+function recompute() {
+  results = { base: computeScenario("base"), bear: computeScenario("bear"), bull: computeScenario("bull") };
+}
+
+/* ── Formatting ─────────────────────────────────────────────────────────── */
+const hasData = () => company.revenue > 0 || company.netIncome > 0 || company.eps > 0;
+const EMDASH = "—";
+
+const fmtM = (v) => (!isFinite(v) || v === 0) ? EMDASH
+  : (v < 0 ? "(" : "") + "$" + Math.abs(v).toLocaleString("en-US", { maximumFractionDigits: 0 }) + (v < 0 ? ")" : "");
+const fmtMShort = (v) => {
+  if (!isFinite(v) || v === 0) return EMDASH;
+  const abs = Math.abs(v);
+  if (abs >= 1e6) return "$" + (v / 1e6).toFixed(2) + "T";
+  if (abs >= 1e3) return "$" + (v / 1e3).toFixed(1) + "B";
+  return "$" + v.toFixed(0) + "M";
+};
+const fmt$ = (v) => (!isFinite(v) || v === 0) ? EMDASH : "$" + v.toFixed(2);
+const fmtPct = (v) => (!isFinite(v) || v === 0) ? EMDASH : (v * 100).toFixed(1) + "%";
+const fmtX = (v) => (!isFinite(v) || v === 0) ? EMDASH : v.toFixed(1) + "x";
+const fmtNum = (v) => (!isFinite(v) || v === 0) ? EMDASH
+  : v.toLocaleString("en-US", { maximumFractionDigits: 1 });
+
+/* ── KPI cards — the four editable 2026 inputs plus one derived ──────────── */
+const LOCK_SVG = `<svg class="lock-glyph" width="12" height="13" viewBox="0 0 14 15" fill="none" aria-hidden="true">
+  <path d="M4 6V4.2a3 3 0 0 1 6 0V6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+  <rect x="2" y="6" width="10" height="7.5" rx="1.8" stroke="currentColor" stroke-width="1.6"/></svg>`;
+
+function renderKPIs() {
+  const margin = safeDiv(company.netIncome, company.revenue);
+  const ro = locked ? " readonly" : "";
+  const cards = [
+    { field: "revenue",   label: "Revenue",     step: "1",    unit: "2026 actual · $ millions" },
+    { field: "netIncome", label: "Net Income",  step: "1",    unit: "2026 actual · $ millions" },
+    { field: "eps",       label: "EPS",         step: "0.01", unit: "2026 reported · $ / share" },
+    { field: "shares",    label: "Shares Out.", step: "0.1",  unit: "millions · held flat" },
+  ];
+  const editable = cards.map(c => {
+    const v = company[c.field];
+    return `<div class="kpi${locked ? " locked" : ""}">
+      ${LOCK_SVG}
+      <div class="kpi-label">${c.label}</div>
+      <input class="kpi-input" type="text" inputmode="decimal" autocomplete="off"
+             value="${v ? +v.toFixed(4) : ""}" placeholder="—"
+             data-co="${c.field}" aria-label="${c.label} 2026"${ro}>
+      <div class="kpi-unit">${c.unit}</div>
+    </div>`;
+  }).join("");
+
+  const derived = `<div class="kpi derived">
+      <div class="kpi-label">Net Margin</div>
+      <div class="kpi-value${margin ? "" : " is-empty"}">${
+        margin ? (margin * 100).toFixed(1) + "%" : "—"}</div>
+      <div class="kpi-unit">calculated · net income ÷ revenue</div>
+    </div>`;
+
+  document.getElementById("kpiGrid").innerHTML = editable + derived;
+
+  document.getElementById("kpiGrid").querySelectorAll(".kpi-input").forEach(inp => {
+    inp.addEventListener("input", onCompanyEdit);
+    inp.addEventListener("focus", () => { if (!inp.readOnly) inp.select(); });
+    // Reformat only once you leave the field — reformatting mid-type is what
+    // made these feel "buggy" (see onCellEdit's comment for the full story).
+    inp.addEventListener("blur", () => {
+      const v = company[inp.dataset.co];
+      inp.value = v ? +v.toFixed(4) : "";
+    });
+  });
+}
+
+/* Keeps a text input numeric-only (digits, one leading "-", one ".") without
+   ever rejecting a valid in-progress value the way <input type="number">
+   does — e.g. typing "12." while heading toward "12.5" used to silently
+   clear the whole field, because number inputs sanitize on every keystroke,
+   not just on commit. Text inputs don't have that failure mode; this just
+   stops stray letters. Only rewrites the field when it actually removed
+   something, so normal digit-by-digit typing never touches the DOM node. */
+function sanitizeNumericInput(inp) {
+  const before = inp.value;
+  let s = before.replace(/[^0-9.\-]/g, "");
+  s = s[0] === "-" ? "-" + s.slice(1).replace(/-/g, "") : s.replace(/-/g, "");
+  const dot = s.indexOf(".");
+  if (dot !== -1) s = s.slice(0, dot + 1) + s.slice(dot + 1).replace(/\./g, "");
+  if (s !== before) {
+    const pos = inp.selectionStart - (before.length - s.length);
+    inp.value = s;
+    try { inp.setSelectionRange(Math.max(0, pos), Math.max(0, pos)); } catch {}
+  }
+  return s;
+}
+
+function onCompanyEdit(ev) {
+  const inp = ev.target;
+  const field = inp.dataset.co;
+  const raw = parseFloat(sanitizeNumericInput(inp));
+  company[field] = isFinite(raw) ? raw : 0;
+  markSource("manual");
+  recompute();
+  persist();
+  // Update every dependent number in place (chart, summary, derived table
+  // cells) WITHOUT touching any <input> element, so the one you're typing in
+  // is never rebuilt, reformatted, or defocused mid-keystroke.
+  renderChart();
+  renderSummary();
+  updateDerivedCells();
+  updateDerivedKPI();
+}
+
+function updateDerivedKPI() {
+  const margin = safeDiv(company.netIncome, company.revenue);
+  const card = document.querySelector(".kpi.derived .kpi-value");
+  if (!card) return;
+  card.textContent = margin ? (margin * 100).toFixed(1) + "%" : "—";
+  card.classList.toggle("is-empty", !margin);
+}
+
+/* ── Lock ───────────────────────────────────────────────────────────────── */
+let locked = false;
+
+function applyLockUI() {
+  const btn = document.getElementById("btnLock");
+  btn.setAttribute("aria-pressed", String(locked));
+  document.getElementById("lockLabel").textContent = locked ? "2026 locked" : "Lock 2026";
+  btn.title = locked
+    ? "2026 is locked — click to edit the base year again"
+    : "Lock the 2026 base year so you can focus on 2027–2030";
+  document.querySelector(".app").setAttribute("data-locked", String(locked));
+  document.getElementById("kpiHint").textContent = locked
+    ? "2026 locked · projections below are yours to drive"
+    : "Base year 2026 · type over any value";
+}
+
+function toggleLock() {
+  locked = !locked;
+  applyLockUI();
+  renderKPIs();
+  renderScenarios();
+  persist();
+}
+
+/* ── Persistence ────────────────────────────────────────────────────────────
+   Two layers:
+   - STORE_KEY: an always-on scratch autosave of whatever is currently on
+     screen, named or not — a crash/reload safety net, unrelated to Save.
+   - PROJECTS_KEY: a map of explicitly named, saved projections you return to
+     via Open. Editing after loading one does NOT overwrite it until you hit
+     Save — same Save/Save As contract as a desktop document editor. */
+const STORE_KEY = "projectionModel.v1";
+const PROJECTS_KEY = "projectionModel.projects.v1";
+const ACTIVE_KEY = "projectionModel.activeProjectId.v1";
+
+let currentProjectId = null;
+let savedSnapshot = null;   // stateJSON() at last load/save, for the dirty check
+
+function persist() {
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify({
+      company, assumptions, locked, dataSource, savedAt: Date.now(),
+    }));
+  } catch { /* private mode / quota — non-fatal */ }
+  updateDirtyUI();
+}
+
+function restore() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (!raw) return false;
+    const s = JSON.parse(raw);
+    if (!s || !s.company) return false;
+    company = { ...company, ...s.company };
+    locked = !!s.locked;
+    if (s.assumptions) {
+      for (const k of ["base", "bear", "bull"]) {
+        if (!s.assumptions[k]) continue;
+        for (const f of ["revGrowth", "niGrowth", "peLow", "peHigh"]) {
+          const arr = s.assumptions[k][f];
+          if (Array.isArray(arr) && arr.length === NY) assumptions[k][f] = arr.map(Number);
+        }
+      }
+    }
+    dataSource = s.dataSource === "sample" ? "sample" : (s.dataSource || "manual");
+    return true;
+  } catch { return false; }
+}
+
+function resetAll() {
+  try { localStorage.removeItem(STORE_KEY); } catch {}
+  location.reload();
+}
+
+/* ── Named projections: Save / Save As / Open / Rename / Duplicate / Delete ── */
+function loadProjects() {
+  try { return JSON.parse(localStorage.getItem(PROJECTS_KEY) || "{}") || {}; }
+  catch { return {}; }
+}
+function saveProjectsMap(map) {
+  try { localStorage.setItem(PROJECTS_KEY, JSON.stringify(map)); } catch { /* quota */ }
+}
+function genId() {
+  return "p_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+function cloneAssumptions() {
+  return JSON.parse(JSON.stringify(assumptions));
+}
+function stateJSON() {
+  return JSON.stringify({ company, assumptions, locked });
+}
+function markClean() { savedSnapshot = stateJSON(); updateDirtyUI(); }
+function isDirty() { return currentProjectId !== null && stateJSON() !== savedSnapshot; }
+
+function updateDirtyUI() {
+  const dot = document.getElementById("dirtyDot");
+  if (dot) dot.hidden = !isDirty();
+  const btn = document.getElementById("btnProjectName");
+  if (btn) btn.title = currentProjectId
+    ? (isDirty() ? "Unsaved changes — click to rename, or Save to keep them" : "Click to rename this projection")
+    : "Not yet saved — click Save to name and keep this projection";
+}
+
+function updateProjectNameUI() {
+  const map = loadProjects();
+  const p = currentProjectId ? map[currentProjectId] : null;
+  document.getElementById("projectNameText").textContent = p ? p.name : "Untitled";
+  updateDirtyUI();
+}
+
+function setActiveProject(id) {
+  currentProjectId = id;
+  try {
+    if (id) localStorage.setItem(ACTIVE_KEY, id);
+    else localStorage.removeItem(ACTIVE_KEY);
+  } catch { /* non-fatal */ }
+  updateProjectNameUI();
+}
+
+/* ── Cross-device sync via the bridge ──────────────────────────────────────
+   The bridge (when running) writes each project as a JSON file inside this
+   app's own folder — which lives in OneDrive, so OneDrive itself carries a
+   saved projection to any other machine signed into the same account. No
+   accounts, no server of our own: just files something else already syncs.
+   All calls here are fire-and-forget — localStorage is always the source of
+   truth for what's on screen right now; the bridge is a mirror, and being
+   briefly unreachable never blocks a save. */
+function syncProjectToBridge(project) {
+  if (!bridgeUp) return;
+  fetch(BRIDGE + "/api/projects", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(project),
+  }).catch(() => { /* offline/bridge down — localStorage already has it */ });
+}
+function syncDeleteToBridge(id) {
+  if (!bridgeUp) return;
+  fetch(BRIDGE + "/api/projects/" + encodeURIComponent(id), { method: "DELETE" })
+    .catch(() => {});
+}
+async function syncFromBridge() {
+  if (!bridgeUp) return;
+  try {
+    const res = await fetch(BRIDGE + "/api/projects");
+    if (!res.ok) return;
+    const remote = await res.json();
+    const local = loadProjects();
+    let changed = false;
+    for (const [id, rp] of Object.entries(remote)) {
+      const lp = local[id];
+      // Newer-wins by timestamp; a project only the other machine has is
+      // just added. A locally-newer edit is never overwritten by a stale
+      // remote copy.
+      if (!lp || (rp.updatedAt || 0) > (lp.updatedAt || 0)) {
+        local[id] = rp;
+        changed = true;
+      }
+    }
+    if (changed) {
+      saveProjectsMap(local);
+      if (document.getElementById("openModal").classList.contains("open")) renderProjectList();
+      if (currentProjectId && local[currentProjectId]) updateProjectNameUI();
+    }
+  } catch { /* non-fatal */ }
+}
+
+function saveAsNew(name) {
+  const map = loadProjects();
+  const id = genId();
+  const now = Date.now();
+  map[id] = {
+    id, name: name.trim() || "Untitled", ticker: company.ticker,
+    company: { ...company }, assumptions: cloneAssumptions(), locked,
+    createdAt: now, updatedAt: now,
+  };
+  saveProjectsMap(map);
+  syncProjectToBridge(map[id]);
+  setActiveProject(id);
+  markClean();
+  return id;
+}
+
+function saveOverActive() {
+  if (!currentProjectId) return false;
+  const map = loadProjects();
+  const existing = map[currentProjectId];
+  if (!existing) return false;
+  map[currentProjectId] = {
+    ...existing, ticker: company.ticker,
+    company: { ...company }, assumptions: cloneAssumptions(), locked,
+    updatedAt: Date.now(),
+  };
+  saveProjectsMap(map);
+  syncProjectToBridge(map[currentProjectId]);
+  markClean();
+  return true;
+}
+
+function loadProjectById(id) {
+  const map = loadProjects();
+  const p = map[id];
+  if (!p) return false;
+  company = { ...company, ...p.company };
+  locked = !!p.locked;
+  if (p.assumptions) {
+    for (const k of ["base", "bear", "bull"]) {
+      if (!p.assumptions[k]) continue;
+      for (const f of ["revGrowth", "niGrowth", "peLow", "peHigh"]) {
+        const arr = p.assumptions[k][f];
+        if (Array.isArray(arr) && arr.length === NY) assumptions[k][f] = arr.map(Number);
+      }
+    }
+  }
+  dataSource = (company.revenue || company.netIncome || company.eps) ? "manual" : "sample";
+  setActiveProject(id);
+  markClean();
+  recompute();
+  applyLockUI();
+  markSource(dataSource);
+  renderAll();
+  persist();
+  return true;
+}
+
+/* True if closing/discarding the current state would actually lose something
+   — either unsaved edits to a named projection, or numbers typed into an
+   untitled one that were never saved at all. Sample data never counts. */
+function hasWorkWorthKeeping() {
+  if (currentProjectId) return isDirty();
+  if (dataSource === "sample") return false;
+  return !!(company.revenue || company.netIncome || company.eps || company.shares);
+}
+
+function startNewProject() {
+  if (hasWorkWorthKeeping()) {
+    const name = currentProjectId ? (loadProjects()[currentProjectId]?.name || "this projection") : "your current numbers";
+    if (!confirm(`Start a new blank projection? Unsaved changes to ${
+      currentProjectId ? `"${name}"` : name} will be lost unless you Save first.`)) {
+      return;
+    }
+  }
+  company = { ticker: "", revenue: 0, netIncome: 0, eps: 0, shares: 0 };
+  assumptions.base = mkAssumptions(0.10, 20, 30);
+  assumptions.bear = mkAssumptions(0.03, 8, 12);
+  assumptions.bull = mkAssumptions(0.18, 20, 28);
+  locked = false;
+  dataSource = "manual";
+  setActiveProject(null);
+  document.getElementById("ticker").value = "";
+  recompute();
+  applyLockUI();
+  markSource(dataSource);
+  renderAll();
+  markClean();
+  persist();
+  flashToast("New blank projection — enter Company Inputs to begin.");
+}
+
+function renameProject(id, name) {
+  const map = loadProjects();
+  if (!map[id]) return;
+  map[id].name = name.trim() || map[id].name;
+  map[id].updatedAt = Date.now();
+  saveProjectsMap(map);
+  syncProjectToBridge(map[id]);
+  if (id === currentProjectId) updateProjectNameUI();
+}
+
+function duplicateProject(id) {
+  const map = loadProjects();
+  const src = map[id];
+  if (!src) return null;
+  const newId = genId();
+  const now = Date.now();
+  map[newId] = { ...src, id: newId, name: src.name + " (copy)", createdAt: now, updatedAt: now };
+  saveProjectsMap(map);
+  syncProjectToBridge(map[newId]);
+  return newId;
+}
+
+function deleteProject(id) {
+  const map = loadProjects();
+  delete map[id];
+  saveProjectsMap(map);
+  syncDeleteToBridge(id);
+  if (id === currentProjectId) setActiveProject(null);
+}
+
+function relTime(ts) {
+  const s = Math.max(0, (Date.now() - ts) / 1000);
+  if (s < 45) return "just now";
+  if (s < 3600) return Math.round(s / 60) + " min ago";
+  if (s < 86400) return Math.round(s / 3600) + " hr ago";
+  const d = Math.round(s / 86400);
+  return d === 1 ? "yesterday" : d < 30 ? d + " days ago" : new Date(ts).toLocaleDateString();
+}
+
+function exportAllProjects() {
+  const payload = { app: "projection-model", exportedAt: Date.now(), projects: loadProjects() };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "projection-model-backup.json";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+
+function importProjectsFromFile(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const parsed = JSON.parse(String(reader.result));
+      const incoming = parsed && parsed.projects && typeof parsed.projects === "object"
+        ? parsed.projects : null;
+      if (!incoming) throw new Error("Not a recognized backup file.");
+      const map = loadProjects();
+      const existingNames = new Set(Object.values(map).map(p => p.name));
+      let count = 0;
+      for (const p of Object.values(incoming)) {
+        if (!p || !p.company || !p.assumptions) continue;
+        const id = genId();
+        let name = p.name || "Imported projection";
+        if (existingNames.has(name)) name += " (imported)";
+        existingNames.add(name);
+        map[id] = { ...p, id, name, createdAt: p.createdAt || Date.now(), updatedAt: Date.now() };
+        count++;
+      }
+      saveProjectsMap(map);
+      renderProjectList();
+      flashToast(count ? `Imported ${count} projection${count === 1 ? "" : "s"}.` : "Nothing to import.");
+    } catch (e) {
+      flashToast("Import failed — " + String(e.message || e), true);
+    }
+  };
+  reader.readAsText(file);
+}
+
+/* ── Chart ──────────────────────────────────────────────────────────────── */
+const METRIC_META = {
+  revenue:   { label: "Revenue",           fmt: fmtMShort, axis: (v) => fmtMShort(v) },
+  netIncome: { label: "Net Income",        fmt: fmtMShort, axis: (v) => fmtMShort(v) },
+  eps:       { label: "EPS",               fmt: fmt$,      axis: (v) => "$" + v.toFixed(2) },
+  priceMid:  { label: "Share Price (mid)", fmt: fmt$,      axis: (v) => "$" + v.toFixed(0) },
+};
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+const el = (n, attrs = {}) => {
+  const e = document.createElementNS(SVG_NS, n);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  return e;
+};
+
+/* Nice-number axis ticks. */
+function niceTicks(min, max, count = 5) {
+  if (!(isFinite(min) && isFinite(max)) || max === min) return [0, 1];
+  const span = max - min;
+  const raw = span / (count - 1);
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const norm = raw / mag;
+  const step = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 2.5 ? 2.5 : norm <= 5 ? 5 : 10) * mag;
+  const lo = Math.floor(min / step) * step;
+  const hi = Math.ceil(max / step) * step;
+  const out = [];
+  for (let v = lo; v <= hi + step * 1e-9; v += step) out.push(+v.toFixed(10));
+  return out;
+}
+
+const PAD = { t: 26, r: 132, b: 40, l: 74 };
+const VB = { w: 920, h: 340 };
+
+function renderChart() {
+  const svg = document.getElementById("chart");
+  // keep <title>/<desc>, drop the rest
+  [...svg.childNodes].forEach(n => { if (!["title", "desc"].includes(n.nodeName)) n.remove(); });
+
+  const meta = METRIC_META[metric];
+  const keys = ["base", "bear", "bull"];
+  const allVals = keys.flatMap(k => results[k][metric]).filter(v => isFinite(v));
+  const dataPresent = hasData() && allVals.some(v => v !== 0);
+
+  const plotW = VB.w - PAD.l - PAD.r;
+  const plotH = VB.h - PAD.t - PAD.b;
+
+  if (!dataPresent) {
+    const g = el("g");
+    const t1 = el("text", { x: VB.w / 2, y: VB.h / 2 - 8, "text-anchor": "middle",
+      fill: "#78776f", "font-size": "14", "font-family": "inherit", "font-weight": "600" });
+    t1.textContent = "No projection to plot yet";
+    const t2 = el("text", { x: VB.w / 2, y: VB.h / 2 + 14, "text-anchor": "middle",
+      fill: "#5d5c55", "font-size": "12", "font-family": "inherit" });
+    t2.textContent = "Refresh from the workbook, or enter Company Inputs values";
+    g.append(t1, t2);
+    svg.append(g);
+    renderLegend(false);
+    return;
+  }
+
+  const dataMax = Math.max(...allVals);
+  const dataMin = Math.min(0, ...allVals);
+  const ticks = niceTicks(dataMin, dataMax, 5);
+  const yMin = ticks[0], yMax = ticks[ticks.length - 1];
+
+  const X = (i) => PAD.l + (plotW * i) / (NY - 1);
+  const Y = (v) => PAD.t + plotH - ((v - yMin) / (yMax - yMin || 1)) * plotH;
+
+  const gGrid = el("g");
+  // horizontal gridlines — solid hairlines, one shade off the surface
+  for (const tv of ticks) {
+    const y = Y(tv);
+    gGrid.append(el("line", { x1: PAD.l, y1: y, x2: PAD.l + plotW, y2: y,
+      stroke: "#2c2c2a", "stroke-width": "1", "shape-rendering": "crispEdges" }));
+    const lab = el("text", { x: PAD.l - 11, y: y + 4, "text-anchor": "end",
+      fill: "#78776f", "font-size": "11", "font-family": "inherit",
+      "font-variant-numeric": "tabular-nums" });
+    lab.textContent = meta.axis(tv);
+    gGrid.append(lab);
+  }
+  // baseline
+  gGrid.append(el("line", { x1: PAD.l, y1: Y(yMin), x2: PAD.l + plotW, y2: Y(yMin),
+    stroke: "#383835", "stroke-width": "1", "shape-rendering": "crispEdges" }));
+  svg.append(gGrid);
+
+  // x labels
+  const gX = el("g");
+  YEARS.forEach((yr, i) => {
+    const t = el("text", { x: X(i), y: VB.h - PAD.b + 22, "text-anchor": "middle",
+      fill: "#78776f", "font-size": "11.5", "font-family": "inherit",
+      "font-variant-numeric": "tabular-nums" });
+    t.textContent = yr;
+    gX.append(t);
+  });
+  svg.append(gX);
+
+  // crosshair (behind marks)
+  const crosshair = el("line", { stroke: "#4a4a46", "stroke-width": "1",
+    y1: PAD.t, y2: PAD.t + plotH, opacity: "0", "shape-rendering": "crispEdges" });
+  crosshair.setAttribute("id", "crosshair");
+  svg.append(crosshair);
+
+  // series lines — 2px, round joins
+  for (const k of keys) {
+    const s = SERIES[k], vals = results[k][metric];
+    const d = vals.map((v, i) => `${i ? "L" : "M"}${X(i).toFixed(2)},${Y(v).toFixed(2)}`).join(" ");
+    svg.append(el("path", { d, fill: "none", stroke: s.color, "stroke-width": "2",
+      "stroke-linejoin": "round", "stroke-linecap": "round" }));
+  }
+
+  // markers — ≥8px, with a 2px surface ring so overlaps stay readable
+  for (const k of keys) {
+    const s = SERIES[k], vals = results[k][metric];
+    vals.forEach((v, i) => {
+      svg.append(el("circle", { cx: X(i), cy: Y(v), r: "4.5", fill: s.color,
+        stroke: "#16161a", "stroke-width": "2", "data-dot": k + "-" + i }));
+    });
+  }
+
+  // direct end labels (3 series ≤ 4 → label them all; identity never color-alone)
+  const ends = keys.map(k => ({ k, y: Y(results[k][metric][NY - 1]), v: results[k][metric][NY - 1] }))
+                   .sort((a, b) => a.y - b.y);
+  // nudge apart if they collide
+  for (let i = 1; i < ends.length; i++) {
+    if (ends[i].y - ends[i - 1].y < 15) ends[i].y = ends[i - 1].y + 15;
+  }
+  for (const e of ends) {
+    const s = SERIES[e.k];
+    const gl = el("g");
+    const name = el("text", { x: PAD.l + plotW + 14, y: e.y - 2, fill: s.color,
+      "font-size": "11.5", "font-family": "inherit", "font-weight": "700" });
+    name.textContent = s.label.replace(" Case", "");
+    const val = el("text", { x: PAD.l + plotW + 14, y: e.y + 12, fill: "#a9a8a1",
+      "font-size": "11", "font-family": "inherit", "font-variant-numeric": "tabular-nums" });
+    val.textContent = meta.fmt(e.v);
+    gl.append(name, val);
+    svg.append(gl);
+  }
+
+  // hover band — generous hit areas (~24px min), one per year
+  const gHit = el("g");
+  YEARS.forEach((yr, i) => {
+    const bw = plotW / (NY - 1);
+    const rect = el("rect", {
+      x: X(i) - bw / 2, y: PAD.t, width: bw, height: plotH,
+      fill: "transparent", "data-hit": i, style: "cursor:crosshair"
+    });
+    gHit.append(rect);
+  });
+  svg.append(gHit);
+
+  attachHover(X, Y, meta);
+  renderLegend(true);
+  if (hoverIdx !== null) showTooltip(hoverIdx, X, Y, meta);
+}
+
+function renderLegend(active) {
+  document.getElementById("chartLegend").innerHTML = ["base", "bear", "bull"].map(k => {
+    const s = SERIES[k];
+    return `<span class="legend-item">
+      <span class="swatch" style="background:${s.color}"></span>
+      <span class="marker" style="background:${s.color}"></span>
+      ${s.label}</span>`;
+  }).join("") + (active ? "" :
+    `<span class="legend-item" style="color:var(--text-muted)">· awaiting data</span>`);
+}
+
+function attachHover(X, Y, meta) {
+  const svg = document.getElementById("chart");
+  svg.querySelectorAll("[data-hit]").forEach(rect => {
+    const i = +rect.getAttribute("data-hit");
+    rect.addEventListener("mouseenter", () => { hoverIdx = i; showTooltip(i, X, Y, meta); });
+    rect.addEventListener("mousemove",  () => { hoverIdx = i; showTooltip(i, X, Y, meta); });
+  });
+  svg.addEventListener("mouseleave", hideTooltip);
+  svg.onkeydown = (ev) => {
+    if (ev.key !== "ArrowLeft" && ev.key !== "ArrowRight") return;
+    ev.preventDefault();
+    const cur = hoverIdx === null ? 0 : hoverIdx;
+    hoverIdx = Math.max(0, Math.min(NY - 1, cur + (ev.key === "ArrowRight" ? 1 : -1)));
+    showTooltip(hoverIdx, X, Y, meta);
+  };
+  svg.addEventListener("blur", hideTooltip);
+}
+
+function showTooltip(i, X, Y, meta) {
+  const tip = document.getElementById("tooltip");
+  const svg = document.getElementById("chart");
+  const ch = svg.querySelector("#crosshair");
+  if (ch) { ch.setAttribute("x1", X(i)); ch.setAttribute("x2", X(i)); ch.setAttribute("opacity", "1"); }
+
+  const rows = ["base", "bear", "bull"].map(k => {
+    const s = SERIES[k];
+    return `<div class="tt-row">
+      <span class="swatch" style="background:${s.color}"></span>
+      <span class="name">${s.label.replace(" Case", "")}</span>
+      <span class="val">${meta.fmt(results[k][metric][i])}</span>
+    </div>`;
+  }).join("");
+  tip.innerHTML = `<div class="tt-year">${YEARS[i]} · ${meta.label}</div>${rows}`;
+  tip.classList.add("show");
+
+  // position in CSS pixels from the viewBox coordinate
+  const rect = svg.getBoundingClientRect();
+  const scale = rect.width / VB.w;
+  const cx = X(i) * scale;
+  const left = Math.min(Math.max(cx + 16, 8), rect.width - tip.offsetWidth - 8);
+  tip.style.left = left + "px";
+  tip.style.top = (PAD.t * scale + 8) + "px";
+}
+function hideTooltip() {
+  hoverIdx = null;
+  document.getElementById("tooltip").classList.remove("show");
+  const ch = document.querySelector("#crosshair");
+  if (ch) ch.setAttribute("opacity", "0");
+}
+
+/* ── Summary table ──────────────────────────────────────────────────────── */
+function renderSummary() {
+  const t = document.getElementById("summaryTable");
+  t.innerHTML = `
+    <thead><tr>
+      <th>Scenario</th><th>Revenue</th><th>Net Income</th><th>EPS</th>
+      <th>Price Low</th><th>Price High</th><th>CAGR Low</th><th>CAGR High</th>
+    </tr></thead>
+    <tbody>${["base", "bear", "bull"].map(k => {
+      const r = results[k], s = SERIES[k];
+      return `<tr>
+        <th style="color:${s.color}">${s.label.toUpperCase()}</th>
+        <td>${fmtM(r.revenue[NY - 1])}</td>
+        <td>${fmtM(r.netIncome[NY - 1])}</td>
+        <td>${fmt$(r.eps[NY - 1])}</td>
+        <td>${fmt$(r.priceLow[NY - 1])}</td>
+        <td>${fmt$(r.priceHigh[NY - 1])}</td>
+        <td class="cagr">${fmtPct(r.cagrLow)}</td>
+        <td class="cagr">${fmtPct(r.cagrHigh)}</td>
+      </tr>`;
+    }).join("")}</tbody>`;
+}
+
+/* ── Scenario tables ────────────────────────────────────────────────────── */
+function renderScenarios() {
+  const host = document.getElementById("scenarios");
+  host.innerHTML = ["base", "bear", "bull"].map(k => {
+    const s = SERIES[k], r = results[k], a = assumptions[k];
+    const HDR_LOCK = `<svg class="hdr-lock" width="9" height="10" viewBox="0 0 14 15" fill="none" aria-hidden="true">
+      <path d="M4 6V4.2a3 3 0 0 1 6 0V6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+      <rect x="2" y="6" width="10" height="7.5" rx="1.8" stroke="currentColor" stroke-width="1.8"/></svg>`;
+    const yearHead = YEARS.map((y, i) => i === 0
+      ? `<th class="year0" title="${locked ? "2026 is locked" : "2026 base year"}">${y}${locked ? HDR_LOCK : ""}</th>`
+      : `<th>${y}</th>`).join("");
+    const y0 = (i) => (i === 0 ? " year0" : "");
+
+    const rowStatic = (label, note, vals, fmt, cls, sep, metricKey) => `
+      <tr${sep ? ' class="row-sep"' : ""}>
+        <th>${label}${note ? `<span class="rowlabel-note">${note}</span>` : ""}</th>
+        ${vals.map((v, i) => v === null
+          ? `<td class="dash${y0(i)}">${EMDASH}</td>`
+          : `<td class="${cls(i)}${y0(i)}"${metricKey ? ` data-d-sc="${k}" data-d-metric="${metricKey}" data-d-i="${i}"` : ""}>${fmt(v)}</td>`).join("")}
+      </tr>`;
+
+    const rowInput = (label, note, arr, field, fmtV, sep) => `
+      <tr${sep ? ' class="row-sep"' : ""}>
+        <th>${label}${note ? `<span class="rowlabel-note">${note}</span>` : ""}</th>
+        ${YEARS.map((y, i) => i === 0 && (field === "revGrowth" || field === "niGrowth")
+          ? `<td class="dash${y0(i)}">${EMDASH}</td>`
+          : `<td class="cellinput${y0(i)}"><input class="cell-edit" type="text" inputmode="decimal" autocomplete="off"
+               value="${fmtV(arr[i])}" data-sc="${k}" data-field="${field}" data-i="${i}"
+               aria-label="${s.label} ${label} ${y}"${i === 0 && locked ? " readonly" : ""}></td>`).join("")}
+      </tr>`;
+
+    return `
+    <div class="card scenario-card" style="--accent:${s.color}">
+      <div class="card-head">
+        <span class="scenario-chip"><span class="swatch"></span>${s.label.toUpperCase()}</span>
+        <span class="sub" id="sub-${k}">
+          CAGR ${fmtPct(r.cagrLow)} – ${fmtPct(r.cagrHigh)} ·
+          2030 price ${fmt$(r.priceLow[NY - 1])} – ${fmt$(r.priceHigh[NY - 1])}
+        </span>
+      </div>
+      <div class="card-body" style="padding:6px 6px 10px">
+        <div class="table-scroll">
+          <table class="model">
+            <thead><tr><th style="text-align:left">Metric</th>${yearHead}</tr></thead>
+            <tbody>
+              ${rowStatic("Revenue", "$ millions", r.revenue, fmtM, (i) => i === 0 ? "link" : "calc", false, "revenue")}
+              ${rowInput("Revenue Growth", "% per year", a.revGrowth, "revGrowth", (v) => (v * 100).toFixed(1))}
+              ${rowStatic("Net Income", "$ millions", r.netIncome, fmtM, (i) => i === 0 ? "link" : "calc", true, "netIncome")}
+              ${rowInput("Net Income Growth", "% per year", a.niGrowth, "niGrowth", (v) => (v * 100).toFixed(1))}
+              ${rowStatic("Net Income Margin", "net income ÷ revenue", r.margin, fmtPct, () => "calc", false, "margin")}
+              ${rowStatic("Shares Outstanding", "millions · flat", r.shares, fmtNum, (i) => i === 0 ? "link" : "calc", true, "shares")}
+              ${rowStatic("EPS", "$ per share", r.eps, fmt$, (i) => i === 0 ? "link" : "calc", false, "eps")}
+              ${rowInput("P/E Low", "multiple", a.peLow, "peLow", (v) => v.toFixed(1), true)}
+              ${rowInput("P/E High", "multiple", a.peHigh, "peHigh", (v) => v.toFixed(1))}
+              ${rowStatic("Share Price Low", "EPS × P/E low", r.priceLow, fmt$, () => "calc", true, "priceLow")}
+              ${rowStatic("Share Price High", "EPS × P/E high", r.priceHigh, fmt$, () => "calc", false, "priceHigh")}
+              ${rowStatic("CAGR Low", "2026 → 2030", [null, null, null, null, r.cagrLow], fmtPct, () => "calc", true, "cagrLow")}
+              ${rowStatic("CAGR High", "2026 → 2030", [null, null, null, null, r.cagrHigh], fmtPct, () => "calc", false, "cagrHigh")}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+  }).join("");
+
+  host.querySelectorAll(".cell-edit").forEach(inp => {
+    inp.addEventListener("input", onCellEdit);
+    inp.addEventListener("focus", () => inp.select());
+    // Reformat (e.g. "1" -> "1.0") only once you leave the field. Doing this
+    // on every keystroke instead — the old behavior — rewrote the input's
+    // own text while you were still typing it, which is what made these
+    // cells feel broken: type "1" for 12%, it snaps to "1.0", your next
+    // keystroke "2" lands after the decimal and produces "1.02" instead of
+    // "12". Growth %/margin fields are the ones that actually rescale
+    // (fraction <-> percent), so they're the ones this was corrupting.
+    inp.addEventListener("blur", () => {
+      const sc = inp.dataset.sc, field = inp.dataset.field, i = +inp.dataset.i;
+      const val = assumptions[sc][field][i];
+      const fmt = CELL_FIELD_FMT[field];
+      if (fmt && isFinite(val)) inp.value = fmt(val);
+    });
+  });
+}
+
+const CELL_FIELD_FMT = {
+  revGrowth: (v) => (v * 100).toFixed(1),
+  niGrowth: (v) => (v * 100).toFixed(1),
+  peLow: (v) => v.toFixed(1),
+  peHigh: (v) => v.toFixed(1),
+};
+
+/* Formatter for each derived metric, keyed the same way as computeScenario()'s
+   return object — used by updateDerivedCells() to refresh derived <td>s by
+   metric name without needing to know the table layout. */
+const DERIVED_FMT = {
+  revenue: fmtM, netIncome: fmtM, margin: fmtPct, shares: fmtNum,
+  eps: fmt$, priceLow: fmt$, priceHigh: fmt$, cagrLow: fmtPct, cagrHigh: fmtPct,
+};
+
+/* Updates every derived (gold/green) cell across all three scenario tables
+   in place, by data-d-* address, plus each card's CAGR/price summary line —
+   deliberately never touches an <input> element, so this is safe to call on
+   every keystroke without disturbing whichever cell you're actively editing. */
+function updateDerivedCells() {
+  document.querySelectorAll("[data-d-metric]").forEach((td) => {
+    const sc = td.dataset.dSc, metric = td.dataset.dMetric, i = +td.dataset.dI;
+    const src = results[sc] && results[sc][metric];
+    const val = Array.isArray(src) ? src[i] : src;
+    const fmt = DERIVED_FMT[metric];
+    if (fmt && val !== undefined) td.textContent = fmt(val);
+  });
+  for (const k of ["base", "bear", "bull"]) {
+    const sub = document.getElementById(`sub-${k}`);
+    const r = results[k];
+    if (sub && r) {
+      sub.textContent =
+        `CAGR ${fmtPct(r.cagrLow)} – ${fmtPct(r.cagrHigh)} · ` +
+        `2030 price ${fmt$(r.priceLow[NY - 1])} – ${fmt$(r.priceHigh[NY - 1])}`;
+    }
+  }
+}
+
+function onCellEdit(ev) {
+  const inp = ev.target;
+  const sc = inp.dataset.sc, field = inp.dataset.field, i = +inp.dataset.i;
+  const raw = parseFloat(sanitizeNumericInput(inp));
+  if (!isFinite(raw)) return;
+  const val = (field === "revGrowth" || field === "niGrowth") ? raw / 100 : raw;
+
+  assumptions[sc][field][i] = val;
+  markSource("manual");
+  recompute();
+  persist();
+
+  // Update every dependent number in place — see updateDerivedCells()'s
+  // comment for why this never touches the input you're typing in.
+  renderChart();
+  renderSummary();
+  updateDerivedCells();
+  updateDerivedKPI();
+}
+
+/* ── Source badge / notice ──────────────────────────────────────────────── */
+function markSource(src) {
+  if (dataSource === "workbook" && src === "manual") { dataSource = "manual"; }
+  else if (dataSource !== "workbook" || src === "workbook") { dataSource = src; }
+  const badge = document.getElementById("srcBadge");
+  const text = document.getElementById("srcText");
+  const map = {
+    sample:   ["badge-sample",   "Sample data"],
+    workbook: ["badge-workbook", "Live from workbook"],
+    api:      ["badge-workbook", "Live from Alpha Vantage"],
+    manual:   ["badge-manual",   "Manual overrides"],
+  };
+  const [cls, label] = map[dataSource] || map.sample;
+  badge.className = "badge " + cls;
+  text.textContent = label;
+
+  const notice = document.getElementById("notice");
+  if (dataSource === "sample" && !noticeDismissed) notice.classList.remove("hidden");
+  else notice.classList.add("hidden");
+}
+let noticeDismissed = false;
+
+/* ── Bridge / refresh ───────────────────────────────────────────────────── */
+const BRIDGE = location.protocol.startsWith("http") ? "" : "http://127.0.0.1:8765";
+
+async function probeBridge() {
+  try {
+    const r = await fetch(BRIDGE + "/api/health", { signal: AbortSignal.timeout(1200) });
+    bridgeUp = r.ok;
+  } catch { bridgeUp = false; }
+  const lbl = document.getElementById("refreshLabel");
+  lbl.textContent = bridgeUp ? "Refresh from Excel" : "Refresh";
+  return bridgeUp;
+}
+
+function applyCompany(d, src) {
+  // A locked base year is deliberate: don't let a refresh silently overwrite it.
+  if (locked) {
+    company.ticker = d.ticker || company.ticker;
+    document.getElementById("ticker").value = company.ticker;
+    persist();
+    showNotice("<strong>2026 is locked</strong> — fetched values were not applied. "
+             + "Unlock the base year if you want to overwrite it.");
+    return;
+  }
+  company = {
+    ticker: d.ticker || company.ticker,
+    revenue: +d.revenue || 0,
+    netIncome: +d.netIncome || 0,
+    eps: +d.eps || 0,
+    shares: +d.shares || 0,
+  };
+  document.getElementById("ticker").value = company.ticker;
+  dataSource = src;
+  markSource(src);
+  recompute();
+  persist();
+  renderAll();
+}
+
+async function doRefresh() {
+  const btn = document.getElementById("btnRefresh");
+  const lbl = document.getElementById("refreshLabel");
+  const app = document.querySelector(".app");
+  btn.classList.add("is-busy");
+  btn.disabled = true;
+  app.style.transition = "opacity .2s";
+  app.style.opacity = ".72";          // hold previous render — no skeleton flash
+  const prev = lbl.textContent;
+
+  try {
+    await probeBridge();
+    const ticker = document.getElementById("ticker").value.trim().toUpperCase() || "AAPL";
+    const key = document.getElementById("apikey").value.trim();
+
+    if (bridgeUp) {
+      lbl.textContent = "Refreshing Excel…";
+      const r = await fetch(BRIDGE + "/api/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ticker, apiKey: key || undefined }),
+      });
+      const j = await r.json();
+      if (!r.ok || j.error) throw new Error(j.error || ("HTTP " + r.status));
+      applyCompany(j, j.source === "alphavantage" ? "api" : "workbook");
+      toast(j.message || "Workbook refreshed.");
+    } else {
+      throw new Error("bridge-down");
+    }
+  } catch (e) {
+    if (String(e.message) === "bridge-down") {
+      showNotice(
+        "<strong>Excel bridge isn't running.</strong> Start it with " +
+        "<code style=\"background:rgba(0,0,0,.35);padding:1px 5px;border-radius:4px\">run_dashboard.bat</code> " +
+        "to pull live values from the workbook and trigger Power Query. " +
+        "Until then, every cell below is still editable by hand."
+      );
+    } else {
+      showNotice("<strong>Refresh failed.</strong> " + escapeHtml(String(e.message)));
+    }
+  } finally {
+    btn.classList.remove("is-busy");
+    btn.disabled = false;
+    lbl.textContent = bridgeUp ? "Refresh from Excel" : "Refresh";
+    app.style.opacity = "1";
+  }
+}
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function showNotice(html) {
+  const n = document.getElementById("notice");
+  document.getElementById("noticeText").innerHTML = html;
+  n.classList.remove("hidden");
+  noticeDismissed = false;
+}
+function toast(msg) {
+  const n = document.getElementById("notice");
+  document.getElementById("noticeText").innerHTML = "<strong>" + escapeHtml(msg) + "</strong>";
+  n.style.borderColor = "rgba(6,176,122,.35)";
+  n.style.background = "linear-gradient(180deg, rgba(6,176,122,.08), rgba(6,176,122,.03))";
+  n.classList.remove("hidden");
+  setTimeout(() => { n.classList.add("hidden"); n.style.borderColor = ""; n.style.background = ""; }, 3200);
+}
+
+/* ── Render orchestration ─────────────────────────────────────────────────
+   Full structural rebuild — only for moments that actually change DOM shape
+   (boot, project load, lock toggle). Per-keystroke updates go through
+   updateDerivedCells()/updateDerivedKPI() instead, which never touch inputs. */
+function renderAll() {
+  renderKPIs();
+  renderChart();
+  renderSummary();
+  renderScenarios();
+}
+
+/* ── Wire up ────────────────────────────────────────────────────────────── */
+document.getElementById("metricSeg").addEventListener("click", (ev) => {
+  const b = ev.target.closest("button[data-metric]");
+  if (!b) return;
+  metric = b.dataset.metric;
+  [...ev.currentTarget.querySelectorAll("button")].forEach(x =>
+    x.setAttribute("aria-pressed", String(x === b)));
+  hideTooltip();
+  renderChart();
+});
+document.getElementById("btnRefresh").addEventListener("click", doRefresh);
+document.getElementById("btnLock").addEventListener("click", toggleLock);
+document.getElementById("btnReset").addEventListener("click", resetAll);
+document.getElementById("btnDismiss").addEventListener("click", () => {
+  noticeDismissed = true;
+  document.getElementById("notice").classList.add("hidden");
+});
+document.getElementById("ticker").addEventListener("change", (e) => {
+  company.ticker = e.target.value.trim().toUpperCase();
+  persist();
+});
+window.addEventListener("resize", () => { if (hoverIdx !== null) hideTooltip(); });
+
+/* ── Modal plumbing (Save As / Rename / Open Projections) ─────────────────── */
+let modalReturnFocus = null;
+
+function openModalEl(el) {
+  modalReturnFocus = document.activeElement;
+  el.classList.add("open");
+  const focusable = el.querySelector("input, button:not(.modal-close)");
+  (focusable || el.querySelector(".modal-close")).focus();
+}
+function closeModalEl(el) {
+  el.classList.remove("open");
+  if (modalReturnFocus && document.body.contains(modalReturnFocus)) modalReturnFocus.focus();
+}
+document.querySelectorAll(".modal-overlay").forEach(overlay => {
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) closeModalEl(overlay); });
+  overlay.querySelectorAll("[data-close-modal]").forEach(b =>
+    b.addEventListener("click", () => closeModalEl(overlay)));
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  document.querySelectorAll(".modal-overlay.open").forEach(closeModalEl);
+});
+
+let flashToastTimer = null;
+function flashToast(msg, isError) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.style.borderColor = isError ? "rgba(212,50,50,.45)" : "rgba(6,176,122,.4)";
+  t.style.color = isError ? "#ff9d9d" : "#7fe0bd";
+  t.classList.add("show");
+  clearTimeout(flashToastTimer);
+  flashToastTimer = setTimeout(() => t.classList.remove("show"), 2400);
+}
+
+/* ── Save As modal ──────────────────────────────────────────────────────── */
+const saveModal = document.getElementById("saveModal");
+const saveNameInput = document.getElementById("saveNameInput");
+let saveModalMode = "saveAs";   // "saveAs" | "rename"
+let renameTargetId = null;
+
+function openSaveAsModal() {
+  saveModalMode = "saveAs";
+  document.getElementById("saveModalTitle").textContent = "Save projection";
+  document.getElementById("saveModalConfirm").textContent = "Save";
+  document.getElementById("saveModalHint").textContent =
+    "Saved on this device, under whatever name you give it — come back to it anytime from Open.";
+  saveNameInput.value = company.ticker ? `${company.ticker} — ${new Date().toLocaleDateString()}` : "";
+  openModalEl(saveModal);
+  saveNameInput.select();
+}
+function openRenameModal(id, currentName) {
+  saveModalMode = "rename";
+  renameTargetId = id;
+  document.getElementById("saveModalTitle").textContent = "Rename projection";
+  document.getElementById("saveModalConfirm").textContent = "Rename";
+  document.getElementById("saveModalHint").textContent = "This only changes the name — your figures are untouched.";
+  saveNameInput.value = currentName;
+  openModalEl(saveModal);
+  saveNameInput.select();
+}
+function confirmSaveModal() {
+  const name = saveNameInput.value.trim();
+  if (!name) { saveNameInput.focus(); return; }
+  if (saveModalMode === "saveAs") {
+    saveAsNew(name);
+    updateProjectNameUI();
+    flashToast(`Saved as "${name}".`);
+  } else {
+    renameProject(renameTargetId, name);
+    renderProjectList();
+    flashToast(`Renamed to "${name}".`);
+  }
+  closeModalEl(saveModal);
+}
+document.getElementById("saveModalConfirm").addEventListener("click", confirmSaveModal);
+saveNameInput.addEventListener("keydown", (e) => { if (e.key === "Enter") confirmSaveModal(); });
+
+/* ── Open Projections modal ────────────────────────────────────────────── */
+const openModal = document.getElementById("openModal");
+const ICON_LOAD = `<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3 8h10M8 3l5 5-5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const ICON_RENAME = `<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M11.3 2.3a1.5 1.5 0 0 1 2.1 2.1L5.5 12.3l-3 .7.7-3 8.1-7.7Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>`;
+const ICON_DUP = `<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="5.5" y="5.5" width="8" height="8" rx="1.2" stroke="currentColor" stroke-width="1.3"/><path d="M10.5 5.5V3.7a1 1 0 0 0-1-1H3.7a1 1 0 0 0-1 1v5.8a1 1 0 0 0 1 1h1.8" stroke="currentColor" stroke-width="1.3"/></svg>`;
+const ICON_DELETE = `<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3 4.5h10M6.5 4.5V3a1 1 0 0 1 1-1h1a1 1 0 0 1 1 1v1.5M4.5 4.5l.6 8.4a1 1 0 0 0 1 .9h3.8a1 1 0 0 0 1-.9l.6-8.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
+function renderProjectList() {
+  const map = loadProjects();
+  const rows = Object.values(map).sort((a, b) => b.updatedAt - a.updatedAt);
+  const host = document.getElementById("projectList");
+  if (!rows.length) {
+    host.innerHTML = `<div class="project-empty">No saved projections yet.<br>Edit some numbers, then hit Save.</div>`;
+    return;
+  }
+  host.innerHTML = rows.map(p => {
+    const active = p.id === currentProjectId;
+    const rev = p.company && p.company.revenue ? fmtMShort(p.company.revenue) : "—";
+    return `
+    <div class="project-row${active ? " is-active" : ""}" data-id="${p.id}">
+      <button class="project-row-main" data-action="load" data-id="${p.id}">
+        <div class="project-row-name">${active ? '<span class="active-pip">●</span>' : ""}${escapeHtml(p.name)}</div>
+        <div class="project-row-meta">${escapeHtml(p.ticker || "—")} · Revenue ${rev} · ${relTime(p.updatedAt)}</div>
+      </button>
+      <div class="project-row-actions">
+        <button class="icon-btn" data-action="rename" data-id="${p.id}" title="Rename" aria-label="Rename">${ICON_RENAME}</button>
+        <button class="icon-btn" data-action="duplicate" data-id="${p.id}" title="Duplicate" aria-label="Duplicate">${ICON_DUP}</button>
+        <button class="icon-btn" data-action="delete" data-id="${p.id}" title="Delete" aria-label="Delete">${ICON_DELETE}</button>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+document.getElementById("projectList").addEventListener("click", (ev) => {
+  const btn = ev.target.closest("[data-action]");
+  if (!btn) return;
+  const id = btn.dataset.id;
+  const map = loadProjects();
+  const p = map[id];
+  if (!p) return;
+  switch (btn.dataset.action) {
+    case "load":
+      loadProjectById(id);
+      closeModalEl(openModal);
+      flashToast(`Opened "${p.name}".`);
+      break;
+    case "rename":
+      openRenameModal(id, p.name);
+      break;
+    case "duplicate": {
+      const newId = duplicateProject(id);
+      renderProjectList();
+      flashToast(`Duplicated as "${p.name} (copy)".`);
+      break;
+    }
+    case "delete":
+      if (confirm(`Delete "${p.name}"? This can't be undone.`)) {
+        deleteProject(id);
+        renderProjectList();
+        updateProjectNameUI();
+        flashToast(`Deleted "${p.name}".`);
+      }
+      break;
+  }
+});
+
+document.getElementById("btnOpen").addEventListener("click", async () => {
+  renderProjectList();
+  openModalEl(openModal);
+  await syncFromBridge();     // pick up anything saved on another machine
+  renderProjectList();        // re-render if that added/updated anything
+});
+document.getElementById("btnExport").addEventListener("click", exportAllProjects);
+document.getElementById("btnImport").addEventListener("click", () =>
+  document.getElementById("importFile").click());
+document.getElementById("importFile").addEventListener("change", (e) => {
+  const file = e.target.files && e.target.files[0];
+  if (file) importProjectsFromFile(file);
+  e.target.value = "";
+});
+
+document.getElementById("btnNew").addEventListener("click", startNewProject);
+
+/* ── Save / rename entry points ────────────────────────────────────────── */
+document.getElementById("btnSave").addEventListener("click", () => {
+  if (currentProjectId && saveOverActive()) {
+    updateProjectNameUI();
+    flashToast("Saved.");
+  } else {
+    openSaveAsModal();
+  }
+});
+document.getElementById("btnProjectName").addEventListener("click", () => {
+  if (currentProjectId) {
+    const map = loadProjects();
+    const p = map[currentProjectId];
+    if (p) { openRenameModal(currentProjectId, p.name); return; }
+  }
+  openSaveAsModal();
+});
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+    e.preventDefault();
+    document.getElementById("btnSave").click();
+  }
+  if ((e.ctrlKey || e.metaKey) && e.altKey && e.key.toLowerCase() === "n") {
+    e.preventDefault();
+    startNewProject();
+  }
+});
+window.addEventListener("beforeunload", (e) => {
+  if (!isDirty()) return;
+  e.preventDefault();
+  e.returnValue = "";
+});
+
+/* Boot: an explicitly opened named projection wins if one is set; otherwise
+   fall back to the scratch autosave; otherwise sample figures (clearly
+   badged) so the layout is legible. Then try to upgrade to real workbook
+   values if the bridge happens to be up and nothing at all was saved. */
+let bootedFromProject = false;
+try {
+  const activeId = localStorage.getItem(ACTIVE_KEY);
+  if (activeId && loadProjects()[activeId]) {
+    loadProjectById(activeId);
+    bootedFromProject = true;
+  }
+} catch { /* non-fatal */ }
+
+let hadSaved = bootedFromProject;
+if (!bootedFromProject) {
+  hadSaved = restore();
+  if (!hadSaved) {
+    company = { ...SAMPLE };
+    dataSource = "sample";
+  }
+  markSource(dataSource);
+  applyLockUI();
+  recompute();
+  renderAll();
+  markClean();
+  updateProjectNameUI();
+}
+
+(async () => {
+  const up = await probeBridge();
+  if (up) await syncFromBridge();   // pick up anything saved on another machine
+
+  // Don't clobber the user's own saved numbers with a workbook read.
+  if (hadSaved) return;
+  if (up) {
+    try {
+      const r = await fetch(BRIDGE + "/api/model");
+      const j = await r.json();
+      if (r.ok && !j.error && (+j.revenue || +j.netIncome)) {
+        applyCompany(j, "workbook");
+        document.getElementById("notice").classList.add("hidden");
+      }
+    } catch {}
+  }
+})();
+
+/* Installable PWA — only works served over http(s) (i.e. via excel_bridge.py);
+   silently skipped on file:// or if the browser lacks the API. This is what
+   makes the browser offer a real "Install app" prompt, as an alternative to
+   launch_app.py's Edge --app-window shortcut. */
+if ("serviceWorker" in navigator && location.protocol !== "file:") {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => { /* non-fatal */ });
+  });
+}
+</script>
+</body>
+</html>

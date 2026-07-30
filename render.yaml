@@ -1,0 +1,16 @@
+# Render.com Blueprint — https://render.com/docs/blueprint-spec
+# Deploy: Render dashboard -> New -> Blueprint -> point at this repo.
+# It reads this file automatically; no manual configuration needed beyond
+# setting BRIDGE_USERNAME / BRIDGE_PASSWORD (see README's cloud section).
+services:
+  - type: web
+    name: projection-model
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python excel_bridge.py
+    envVars:
+      - key: BRIDGE_USERNAME
+        sync: false
+      - key: BRIDGE_PASSWORD
+        sync: false
