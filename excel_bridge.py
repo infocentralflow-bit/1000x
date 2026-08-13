@@ -755,6 +755,9 @@ def main():
         if not IS_CLOUD:
             print("             enable the Excel path with:  pip install pywin32")
 
+    print(f"  [diag]   : DEBUG_PING={os.environ.get('DEBUG_PING', '<unset>')!r} "
+          f"DATABASE_URL_len={len(DATABASE_URL)} env_keys={sorted(os.environ.keys())}")
+
     if USE_PG:
         ok, err = pg_init()
         if ok:
