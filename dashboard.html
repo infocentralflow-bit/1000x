@@ -110,7 +110,9 @@ body {
   font: inherit; font-size: 13px;
   transition: border-color .18s var(--ease), box-shadow .18s var(--ease), background .18s var(--ease);
 }
-.input:hover { border-color: rgba(255,255,255,.18); }
+@media (hover: hover) and (pointer: fine) {
+  .input:hover { border-color: rgba(255,255,255,.18); }
+}
 .input:focus {
   outline: none; border-color: var(--gold-dim);
   box-shadow: 0 0 0 3px var(--gold-glow);
@@ -134,11 +136,15 @@ body {
   color: #201a04;
   box-shadow: 0 1px 0 rgba(255,255,255,.25) inset, 0 6px 18px -8px rgba(255,217,102,.6);
 }
-.btn-primary:hover { box-shadow: 0 1px 0 rgba(255,255,255,.3) inset, 0 10px 26px -8px rgba(255,217,102,.75); }
+@media (hover: hover) and (pointer: fine) {
+  .btn-primary:hover { box-shadow: 0 1px 0 rgba(255,255,255,.3) inset, 0 10px 26px -8px rgba(255,217,102,.75); }
+}
 .btn-ghost {
   background: var(--surface-3); color: var(--text-primary); border-color: var(--hairline);
 }
-.btn-ghost:hover { background: #2c2c34; border-color: rgba(255,255,255,.18); }
+@media (hover: hover) and (pointer: fine) {
+  .btn-ghost:hover { background: #2c2c34; border-color: rgba(255,255,255,.18); }
+}
 .btn[disabled] { opacity: .5; cursor: not-allowed; transform: none; }
 
 .spinner {
@@ -324,7 +330,9 @@ body {
   border: 1px solid var(--hairline); background: var(--surface-2); color: var(--text-secondary);
   cursor: pointer; transition: all .18s var(--ease);
 }
-.icon-btn:hover { color: var(--text-primary); border-color: rgba(255,255,255,.24); transform: translateY(-1px); }
+@media (hover: hover) and (pointer: fine) {
+  .icon-btn:hover { color: var(--text-primary); border-color: rgba(255,255,255,.24); transform: translateY(-1px); }
+}
 .icon-btn:focus-visible { outline: 2px solid var(--gold-dim); outline-offset: 2px; }
 .icon-btn.wide { width: auto; padding: 0 13px; font-size: 12.5px; font-weight: 650; }
 .btn-cluster { display: inline-flex; gap: 8px; align-items: center; }
@@ -378,7 +386,9 @@ body {
   border: 1px solid var(--hairline); background: var(--surface-1);
   transition: border-color .16s var(--ease), background .16s var(--ease);
 }
-.project-row:hover { border-color: rgba(255,217,102,.28); background: #1a1a20; }
+@media (hover: hover) and (pointer: fine) {
+  .project-row:hover { border-color: rgba(255,217,102,.28); background: #1a1a20; }
+}
 .project-row.is-active { border-color: rgba(255,217,102,.45); background: rgba(255,217,102,.05); }
 .project-row-main { flex: 1; min-width: 0; text-align: left; background: none; border: none; cursor: pointer;
   color: inherit; font: inherit; padding: 0; }
@@ -469,7 +479,9 @@ th.year0 .hdr-lock { margin-left: 5px; opacity: .8; vertical-align: -1px; }
   padding: 6px 13px; border-radius: 7px; cursor: pointer;
   transition: background .18s var(--ease), color .18s var(--ease);
 }
-.seg button:hover { color: var(--text-primary); background: rgba(255,255,255,.05); }
+@media (hover: hover) and (pointer: fine) {
+  .seg button:hover { color: var(--text-primary); background: rgba(255,255,255,.05); }
+}
 .seg button[aria-pressed="true"] {
   background: linear-gradient(180deg, rgba(255,217,102,.2), rgba(255,217,102,.1));
   color: var(--gold);
@@ -479,7 +491,7 @@ th.year0 .hdr-lock { margin-left: 5px; opacity: .8; vertical-align: -1px; }
 
 /* ── Chart ───────────────────────────────────────────────────────────────── */
 .chart-wrap { position: relative; overflow-x: auto; }
-#chart { display: block; width: 100%; height: auto; touch-action: none; }
+#chart { display: block; width: 100%; height: auto; touch-action: pan-x pan-y; }
 /* Below this width the 920-unit viewBox would squash axis labels to ~4px.
    Hold a readable minimum and let the chart scroll inside its own card
    instead — the page body never scrolls sideways. */
@@ -539,8 +551,10 @@ table.model tbody th {
 }
 table.model td { font-variant-numeric: tabular-nums; color: var(--text-primary); }
 table.model tbody tr { transition: background .15s var(--ease); }
-table.model tbody tr:hover { background: rgba(255,255,255,.028); }
-table.model tbody tr:hover th { background: #1a1a1f; }
+@media (hover: hover) and (pointer: fine) {
+  table.model tbody tr:hover { background: rgba(255,255,255,.028); }
+  table.model tbody tr:hover th { background: #1a1a1f; }
+}
 table.model tr.row-sep td, table.model tr.row-sep th { border-top: 1px solid var(--hairline); }
 
 td.calc { color: var(--gold); font-weight: 600; }        /* gold = calculated, per Excel legend */
@@ -555,7 +569,9 @@ td.cellinput { padding: 4px 6px; }
   font-variant-numeric: tabular-nums;
   transition: border-color .16s var(--ease), box-shadow .16s var(--ease), background .16s var(--ease);
 }
-.cell-edit:hover { border-color: rgba(255,255,255,.34); }
+@media (hover: hover) and (pointer: fine) {
+  .cell-edit:hover { border-color: rgba(255,255,255,.34); }
+}
 .cell-edit:focus {
   outline: none; border-style: solid; border-color: var(--gold-dim);
   box-shadow: 0 0 0 3px var(--gold-glow); background: #08080a;
@@ -576,7 +592,9 @@ table.summary thead th:first-child, table.summary tbody th { text-align: left; }
 table.summary tbody th { font-weight: 700; font-size: 12.5px; letter-spacing: .03em; }
 table.summary td { font-variant-numeric: tabular-nums; font-weight: 600; }
 table.summary tbody tr { transition: background .15s var(--ease); }
-table.summary tbody tr:hover { background: rgba(255,255,255,.03); }
+@media (hover: hover) and (pointer: fine) {
+  table.summary tbody tr:hover { background: rgba(255,255,255,.03); }
+}
 table.summary .cagr { color: var(--gold); }
 
 footer.legal {
@@ -605,8 +623,28 @@ footer.legal code {
 }
 @media (max-width: 720px) {
   .app { padding: 14px 13px 48px; }
-  .topbar { position: static; }
+  .topbar { position: static; flex-direction: column; align-items: stretch; gap: 10px; }
+  .topbar .brand { margin-right: 0; }
+  .topbar .field { width: 100%; }
+  .topbar .field .input, .topbar .project-name-btn { width: 100%; }
+  .topbar .btn-cluster { width: 100%; justify-content: space-between; }
+  .topbar #btnRefresh { width: 100%; }
+  .topbar #srcBadge { align-self: flex-start; }
   .kpi-value { font-size: 23px; }
+
+  table.model th, table.model td { padding: 6px 8px; font-size: 12.5px; }
+  table.model tbody th { min-width: 148px; }
+  .cell-edit { width: 68px; padding: 4px 5px; font-size: 12px; }
+  table.summary th, table.summary td { padding: 7px 9px; font-size: 12.5px; }
+}
+
+/* ── iPhone / touch adaptation (additive — desktop mouse layout above is untouched) ── */
+@media (pointer: coarse) {
+  .icon-btn { width: 44px; height: 44px; }
+  .project-row-actions .icon-btn { width: 44px; height: 44px; }
+  .modal-close { width: 40px; height: 40px; }
+  .input, .btn, .btn-primary, .btn-ghost, .lock-btn { min-height: 44px; }
+  .cell-edit { min-height: 38px; }
 }
 </style>
 </head>
@@ -1526,6 +1564,28 @@ function attachHover(X, Y, meta) {
     showTooltip(hoverIdx, X, Y, meta);
   };
   svg.addEventListener("blur", hideTooltip);
+
+  // Touch support — additive, parallel to the mouse listeners above; does not
+  // alter mouse/desktop behavior. Computes the year index from the touch
+  // point's clientX (inverse of X(i)) rather than relying on the touch event's
+  // target, since touchmove keeps the original touchstart target regardless
+  // of where the finger currently is.
+  const pickIndexFromClientX = (clientX) => {
+    const rect = svg.getBoundingClientRect();
+    const scale = rect.width / VB.w;
+    const localX = (clientX - rect.left) / scale;
+    const bw = (VB.w - PAD.l - PAD.r) / (NY - 1);
+    return Math.max(0, Math.min(NY - 1, Math.round((localX - PAD.l) / bw)));
+  };
+  const touchUpdate = (ev) => {
+    const t = ev.touches[0] || ev.changedTouches[0];
+    if (!t) return;
+    hoverIdx = pickIndexFromClientX(t.clientX);
+    showTooltip(hoverIdx, X, Y, meta);
+  };
+  svg.addEventListener("touchstart", touchUpdate, { passive: true });
+  svg.addEventListener("touchmove", touchUpdate, { passive: true });
+  svg.addEventListener("touchend", hideTooltip, { passive: true });
 }
 
 function showTooltip(i, X, Y, meta) {
