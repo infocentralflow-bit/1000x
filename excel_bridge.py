@@ -130,6 +130,40 @@ def resolve_cells(wb):
 SAVES_DIR = os.path.join(HERE, "saves")
 PROJECT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
 
+# On a cloud host the filesystem is wiped on every restart and redeploy, so the
+# files above can't be the storage layer there. Set DATABASE_URL and projections
+# go to Postgres instead, which is what actually makes them survive a restart
+# and show up on your other devices. Left unset — the normal local/OneDrive
+# setup — nothing changes and the files stay the storage.
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+USE_PG = bool(DATABASE_URL)
+_pg_error = None
+
+
+def _pg_connect():
+    import psycopg
+    return psycopg.connect(DATABASE_URL, connect_timeout=10)
+
+
+def pg_init():
+    """Create the table if needed. Returns (ok, error_message)."""
+    global _pg_error
+    try:
+        with _pg_connect() as conn, conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS projections (
+                    id         TEXT PRIMARY KEY,
+                    data       TEXT NOT NULL,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+            """)
+            conn.commit()
+        _pg_error = None
+        return True, None
+    except Exception as exc:                                     # noqa: BLE001
+        _pg_error = str(exc)
+        return False, _pg_error
+
 
 def _project_path(project_id):
     if not PROJECT_ID_RE.match(project_id or ""):
@@ -140,6 +174,21 @@ def _project_path(project_id):
 def list_saved_projects():
     """Every saved projection, keyed by id — same shape as the client's map."""
     out = {}
+    if USE_PG:
+        try:
+            with _pg_connect() as conn, conn.cursor() as cur:
+                cur.execute("SELECT data FROM projections")
+                for (raw,) in cur.fetchall():
+                    try:
+                        data = json.loads(raw)
+                    except json.JSONDecodeError:
+                        continue        # skip one bad row, don't fail the list
+                    if isinstance(data, dict) and data.get("id"):
+                        out[data["id"]] = data
+        except Exception as exc:                                 # noqa: BLE001
+            print(f"[bridge] Postgres read failed: {exc}", flush=True)
+        return out
+
     if not os.path.isdir(SAVES_DIR):
         return out
     for name in os.listdir(SAVES_DIR):
@@ -156,9 +205,29 @@ def list_saved_projects():
 
 
 def write_saved_project(data):
-    """Create or overwrite one project's file. Returns (ok, error_message)."""
+    """Create or overwrite one saved projection. Returns (ok, error_message)."""
     if not isinstance(data, dict) or not data.get("id") or not data.get("name"):
         return False, "Project must include at least 'id' and 'name'."
+    if not PROJECT_ID_RE.match(data["id"]):
+        return False, "Invalid project id."
+
+    if USE_PG:
+        # Surface a failure rather than silently falling back to the ephemeral
+        # disk — the browser still holds its own copy, so the user loses
+        # nothing, but they do need to know sync didn't happen.
+        try:
+            with _pg_connect() as conn, conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO projections (id, data, updated_at)
+                    VALUES (%s, %s, now())
+                    ON CONFLICT (id) DO UPDATE
+                        SET data = EXCLUDED.data, updated_at = now()
+                """, (data["id"], json.dumps(data)))
+                conn.commit()
+            return True, None
+        except Exception as exc:                                 # noqa: BLE001
+            return False, f"Could not save to database: {exc}"
+
     path = _project_path(data["id"])
     if path is None:
         return False, "Invalid project id."
@@ -172,6 +241,20 @@ def write_saved_project(data):
 
 
 def delete_saved_project(project_id):
+    if not PROJECT_ID_RE.match(project_id or ""):
+        return False
+
+    if USE_PG:
+        try:
+            with _pg_connect() as conn, conn.cursor() as cur:
+                cur.execute("DELETE FROM projections WHERE id = %s", (project_id,))
+                deleted = cur.rowcount > 0
+                conn.commit()
+            return deleted
+        except Exception as exc:                                 # noqa: BLE001
+            print(f"[bridge] Postgres delete failed: {exc}", flush=True)
+            return False
+
     path = _project_path(project_id)
     if path is None or not os.path.isfile(path):
         return False
@@ -671,6 +754,19 @@ def main():
         print("  pywin32  : NOT installed — refresh will use Alpha Vantage directly.")
         if not IS_CLOUD:
             print("             enable the Excel path with:  pip install pywin32")
+
+    if USE_PG:
+        ok, err = pg_init()
+        if ok:
+            print("  saves    : Postgres (DATABASE_URL) — synced across devices")
+        else:
+            print("  saves    : Postgres CONFIGURED BUT UNREACHABLE — saving will fail")
+            print(f"             {err}")
+    elif IS_CLOUD:
+        print("  saves    : local files — WIPED ON EVERY RESTART on this host.")
+        print("             set DATABASE_URL to keep them and sync across devices.")
+    else:
+        print(f"  saves    : {SAVES_DIR}")
 
     url = f"http://127.0.0.1:{PORT}/"
     print(f"  serving  : {url}" if not IS_CLOUD else f"  serving  : 0.0.0.0:{PORT}")

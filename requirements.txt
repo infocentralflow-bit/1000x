@@ -1,1 +1,5 @@
 openpyxl>=3.1
+# Only used when DATABASE_URL is set (cloud deploys, where the filesystem is
+# wiped on restart). Harmless locally — the file-based saves/ path never
+# imports it.
+psycopg[binary]>=3.1
