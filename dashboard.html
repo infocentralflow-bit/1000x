@@ -58,6 +58,9 @@
 }
 
 * { box-sizing: border-box; }
+/* Several togglable elements below set display:flex/grid, which would otherwise
+   win over the UA's [hidden] rule and keep them visible when hidden is set. */
+[hidden] { display: none !important; }
 html, body { margin: 0; padding: 0; }
 body {
   background:
@@ -85,7 +88,55 @@ body {
   position: sticky; top: 12px; z-index: 40;
   backdrop-filter: blur(8px);
 }
-.brand { display: flex; align-items: center; gap: 11px; margin-right: auto; }
+/* The brand doubles as the product switcher, so the growing app family costs
+   no extra horizontal room in an already-crowded bar (and no extra row on a
+   phone, where the topbar is stacked). */
+.brand-switch { position: relative; margin-right: auto; }
+.brand {
+  display: flex; align-items: center; gap: 11px;
+  padding: 4px 9px 4px 4px; margin: -4px -9px -4px -4px;
+  background: none; border: 1px solid transparent; border-radius: var(--r-md);
+  font: inherit; color: inherit; text-align: left; cursor: pointer;
+  transition: background .18s var(--ease), border-color .18s var(--ease);
+}
+.brand-caret { flex: none; opacity: .5; transition: transform .2s var(--ease); }
+.brand[aria-expanded="true"] { background: var(--surface-2); border-color: var(--hairline); }
+.brand[aria-expanded="true"] .brand-caret { transform: rotate(180deg); }
+.brand:focus-visible { outline: 2px solid var(--gold-dim); outline-offset: 2px; }
+@media (hover: hover) and (pointer: fine) {
+  .brand:hover { background: var(--surface-2); border-color: var(--hairline); }
+}
+.product-menu {
+  position: absolute; top: calc(100% + 9px); left: 0; z-index: 60;
+  min-width: 268px; padding: 6px;
+  display: flex; flex-direction: column; gap: 3px;
+  background: linear-gradient(180deg, var(--surface-2), var(--surface-1));
+  border: 1px solid var(--hairline); border-radius: var(--r-md);
+  box-shadow: 0 22px 54px -18px rgba(0,0,0,.9), 0 1px 2px rgba(0,0,0,.55);
+  animation: rise .16s var(--ease) both;
+}
+.product-menu[hidden] { display: none; }
+.product-item {
+  display: flex; align-items: center; gap: 11px; width: 100%;
+  padding: 9px 10px; border-radius: var(--r-sm);
+  border: 1px solid transparent; background: none; color: inherit;
+  font: inherit; text-align: left; cursor: pointer;
+  transition: background .15s var(--ease), border-color .15s var(--ease);
+}
+.product-item .pm-mark {
+  width: 30px; height: 30px; flex: none; border-radius: 8px;
+  display: grid; place-items: center;
+  font-weight: 800; font-size: 12.5px; letter-spacing: -.4px;
+}
+.product-item .pm-name { display: block; font-size: 13px; font-weight: 650; }
+.product-item .pm-sub  { display: block; font-size: 11px; color: var(--text-muted); margin-top: 1px; }
+.product-item .pm-check { margin-left: auto; flex: none; color: var(--gold); opacity: 0; }
+.product-item[aria-current="true"] { background: rgba(255,217,102,.06); border-color: rgba(255,217,102,.22); }
+.product-item[aria-current="true"] .pm-check { opacity: 1; }
+.product-item:focus-visible { outline: 2px solid var(--gold-dim); outline-offset: -1px; }
+@media (hover: hover) and (pointer: fine) {
+  .product-item:hover { background: var(--surface-3); }
+}
 .brand-mark {
   width: 34px; height: 34px; flex: none; border-radius: 9px;
   background: linear-gradient(145deg, var(--gold), #8f7526);
@@ -631,13 +682,95 @@ footer.legal code {
   overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
 }
 
+/* ── Compound calculator ─────────────────────────────────────────────────── */
+/* Low / base / high are separated by lightness rather than hue, so the ramp
+   survives any colour-vision deficiency; endpoints are labelled on the chart
+   too, so colour is never the only cue. All three clear 5:1 on the card. */
+:root {
+  --calc-low:  #c08f2e;
+  --calc-base: #ffd966;
+  --calc-high: #ffeda8;
+}
+.calc-layout {
+  display: grid; gap: 16px; align-items: start;
+  grid-template-columns: 336px minmax(0, 1fr);
+}
+/* Grid items default to min-width:auto, which would let the chart's 660px
+   floor (see the max-width:760px rule below) push the whole grid wider than
+   the phone and scroll the page sideways. Let them shrink; the chart keeps
+   its own horizontal scroll inside .chart-wrap. */
+.calc-layout > * { min-width: 0; }
+.calc-field { margin-bottom: 15px; }
+.calc-field label {
+  display: block; margin-bottom: 7px;
+  font-size: 10.5px; font-weight: 650; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--text-muted);
+}
+.calc-input {
+  width: 100%; padding: 11px 12px;
+  background: var(--plane); border: 1px solid var(--hairline);
+  border-radius: var(--r-sm); color: var(--text-primary);
+  font: inherit; font-size: 17px; font-weight: 650; letter-spacing: -.3px;
+  font-variant-numeric: tabular-nums;
+  transition: border-color .18s var(--ease), box-shadow .18s var(--ease), background .18s var(--ease);
+}
+.calc-input:focus {
+  outline: none; border-color: var(--gold-dim);
+  box-shadow: 0 0 0 3px var(--gold-glow); background: #08080a;
+}
+.calc-input.is-invalid { border-color: rgba(212,50,50,.65); }
+@media (hover: hover) and (pointer: fine) {
+  .calc-input:hover { border-color: rgba(255,255,255,.18); }
+}
+.calc-hint { margin-top: 6px; font-size: 11px; color: var(--text-muted); }
+.calc-actions { display: flex; gap: 10px; margin-top: 18px; }
+.calc-actions .btn { flex: 1; }
+
+.calc-cards {
+  display: grid; gap: 14px; margin-bottom: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(206px, 1fr));
+}
+.calc-card {
+  position: relative; overflow: hidden; padding: 15px 16px 14px;
+  background: linear-gradient(180deg, var(--surface-2), var(--surface-1));
+  border: 1px solid var(--hairline); border-radius: var(--r-md);
+  box-shadow: var(--shadow-card);
+  animation: rise .4s var(--ease) both;
+}
+.calc-card::after {
+  content: ""; position: absolute; inset: 0 0 auto; height: 2px;
+  background: linear-gradient(90deg, var(--accent), transparent 82%);
+}
+.calc-card:nth-child(2) { animation-delay: .04s; }
+.calc-card:nth-child(3) { animation-delay: .08s; }
+.calc-card-label {
+  font-size: 10.5px; font-weight: 650; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px;
+}
+.calc-card-value {
+  font-size: 25px; font-weight: 680; letter-spacing: -.8px; line-height: 1.1;
+  color: var(--text-primary);
+}
+.calc-card-rows { margin-top: 11px; padding-top: 10px; border-top: 1px solid var(--hairline); }
+.calc-row { display: flex; align-items: baseline; gap: 10px; font-size: 12px; padding: 2.5px 0; }
+.calc-row .k { color: var(--text-secondary); }
+.calc-row .v { margin-left: auto; font-weight: 650; font-variant-numeric: tabular-nums; }
+
+#calcChart { display: block; width: 100%; height: auto; touch-action: pan-x pan-y; }
+#calcChart:focus-visible { outline: 2px solid var(--gold-dim); outline-offset: 3px; border-radius: 8px; }
+@media (max-width: 760px) {
+  #calcChart { min-width: 660px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
 @media (max-width: 720px) {
   .app { padding: 14px 13px 48px; }
   .topbar { position: static; flex-direction: column; align-items: stretch; gap: 10px; }
-  .topbar .brand { margin-right: 0; }
+  .topbar .brand-switch { margin-right: 0; }
+  .product-menu { left: 0; right: 0; min-width: 0; }
+  .calc-layout { grid-template-columns: minmax(0, 1fr); }
   .topbar .field { width: 100%; }
   .topbar .field .input, .topbar .project-name-btn { width: 100%; }
   .topbar .btn-cluster { width: 100%; justify-content: space-between; }
@@ -665,15 +798,43 @@ footer.legal code {
 <div class="app">
 
   <header class="topbar">
-    <div class="brand">
-      <div class="brand-mark">FP</div>
-      <div class="brand-text">
-        <h1>Projection Model</h1>
-        <p>Scenario terminal · 2026–2030</p>
+    <div class="brand-switch">
+      <button id="btnProduct" class="brand" aria-haspopup="true" aria-expanded="false"
+              aria-controls="productMenu" title="Switch product">
+        <div class="brand-mark" id="brandMark">FP</div>
+        <div class="brand-text">
+          <h1 id="productTitle">Projection Model</h1>
+          <p id="productSub">Scenario terminal · 2026–2030</p>
+        </div>
+        <svg class="brand-caret" width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M4 6.5 8 10.5l4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+      <div id="productMenu" class="product-menu" role="menu" aria-labelledby="btnProduct" hidden>
+        <button class="product-item" role="menuitem" data-view="projection" aria-current="true">
+          <span class="pm-mark" style="background:linear-gradient(145deg,var(--gold),#8f7526);color:#221c05">FP</span>
+          <span>
+            <span class="pm-name">Projection Model</span>
+            <span class="pm-sub">Base / Bear / Bull scenario terminal</span>
+          </span>
+          <svg class="pm-check" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M3 8.5 6.5 12 13 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <button class="product-item" role="menuitem" data-view="calculator">
+          <span class="pm-mark" style="background:linear-gradient(145deg,#e9c766,#7d6520);color:#221c05">CI</span>
+          <span>
+            <span class="pm-name">Compound Calculator</span>
+            <span class="pm-sub">Growth with regular contributions</span>
+          </span>
+          <svg class="pm-check" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M3 8.5 6.5 12 13 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
       </div>
     </div>
 
-    <div class="field project-field">
+    <div class="field project-field" data-view-only="projection">
       <label for="btnProjectName">Projection</label>
       <button id="btnProjectName" class="project-name-btn" title="Click to rename">
         <span class="name-text" id="projectNameText">Untitled</span>
@@ -684,7 +845,7 @@ footer.legal code {
       </button>
     </div>
 
-    <div class="btn-cluster">
+    <div class="btn-cluster" data-view-only="projection">
       <button id="btnNew" class="icon-btn" title="New blank projection (Ctrl+Alt+N)" aria-label="New projection">
         <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
           <path d="M4 2h5l3 3v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
@@ -705,23 +866,25 @@ footer.legal code {
       </button>
     </div>
 
-    <div class="field">
+    <div class="field" data-view-only="projection">
       <label for="ticker">Ticker</label>
       <input id="ticker" class="input" value="AAPL" autocomplete="off" spellcheck="false" aria-label="Stock ticker">
     </div>
 
-    <div class="field">
+    <div class="field" data-view-only="projection">
       <label for="apikey">Alpha Vantage key</label>
       <input id="apikey" class="input" type="password" placeholder="optional" autocomplete="off" aria-label="Alpha Vantage API key">
     </div>
 
-    <span id="srcBadge" class="badge badge-sample"><span class="dot"></span><span id="srcText">Sample data</span></span>
+    <span id="srcBadge" class="badge badge-sample" data-view-only="projection"><span class="dot"></span><span id="srcText">Sample data</span></span>
 
-    <button id="btnRefresh" class="btn btn-primary">
+    <button id="btnRefresh" class="btn btn-primary" data-view-only="projection">
       <span class="spinner" aria-hidden="true"></span>
       <span id="refreshLabel">Refresh</span>
     </button>
   </header>
+
+  <div id="viewProjection">
 
   <div id="notice" class="notice">
     <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -818,6 +981,83 @@ footer.legal code {
     prior year's assumption forward so the projection is never dead, and every carried cell is editable above.
     Share counts are held flat across all five years, as in the workbook.
   </footer>
+
+  </div><!-- /#viewProjection -->
+
+  <!-- ── Compound interest calculator ──────────────────────────────────── -->
+  <div id="viewCalculator" hidden>
+    <div class="section-head">
+      <h2>Compound Interest Calculator</h2>
+      <span class="hint">Growth over time with regular contributions and annual compounding</span>
+      <span class="rule"></span>
+    </div>
+
+    <div class="calc-layout">
+      <div class="card">
+        <div class="card-head"><span class="scenario-chip">INPUTS</span></div>
+        <div class="card-body">
+          <div class="calc-field">
+            <label for="calcInitial">Initial investment</label>
+            <input id="calcInitial" class="calc-input" type="text" inputmode="decimal" autocomplete="off" data-calc="initial">
+            <div class="calc-hint">Amount you invest at the start.</div>
+          </div>
+          <div class="calc-field">
+            <label for="calcMonthly">Monthly contribution</label>
+            <input id="calcMonthly" class="calc-input" type="text" inputmode="decimal" autocomplete="off" data-calc="monthly">
+            <div class="calc-hint">Use a negative number for monthly withdrawals.</div>
+          </div>
+          <div class="calc-field">
+            <label for="calcYears">Length of time in years</label>
+            <input id="calcYears" class="calc-input" type="text" inputmode="decimal" autocomplete="off" data-calc="years">
+          </div>
+          <div class="calc-field">
+            <label for="calcRate">Estimated annual interest rate (%)</label>
+            <input id="calcRate" class="calc-input" type="text" inputmode="decimal" autocomplete="off" data-calc="rate">
+          </div>
+          <div class="calc-field">
+            <label for="calcVariance">Interest rate variance range (%)</label>
+            <input id="calcVariance" class="calc-input" type="text" inputmode="decimal" autocomplete="off" data-calc="variance">
+            <div class="calc-hint">Creates a low and high projection around your base rate.</div>
+          </div>
+          <div class="calc-actions">
+            <button id="btnCalcRun" class="btn btn-primary">Calculate</button>
+            <button id="btnCalcReset" class="btn btn-ghost">Reset</button>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="calc-cards" id="calcCards"></div>
+        <div class="card">
+          <div class="card-head">
+            <span class="scenario-chip">GROWTH OVER TIME</span>
+            <span class="sub" id="calcChartSub"></span>
+          </div>
+          <div class="chart-wrap">
+            <svg id="calcChart" viewBox="0 0 920 340" role="img" tabindex="0"
+                 aria-labelledby="calcChartTitle" aria-describedby="calcChartDesc">
+              <title id="calcChartTitle">Projected balance over time</title>
+              <desc id="calcChartDesc">Low, base and high projections of the balance for each year.
+                Final values are shown in the cards above.</desc>
+            </svg>
+          </div>
+          <div class="chart-legend" id="calcLegend"></div>
+        </div>
+      </div>
+    </div>
+
+    <footer class="legal">
+      <strong style="color:var(--text-secondary)">How this is calculated.</strong>
+      Balance = P × (1 + r)<sup>t</sup> + PMT × [((1 + r)<sup>t</sup> − 1) ÷ ((1 + r)<sup>1/12</sup> − 1)],
+      where <em>P</em> is the initial investment, <em>PMT</em> the monthly contribution, <em>r</em> the annual
+      rate and <em>t</em> the year. Interest compounds annually; each monthly contribution earns growth for the
+      fraction of the year it's actually invested.
+      <br><br>
+      The low and high projections apply the variance range to your base rate — a 15% base with a 5% range
+      projects 10% and 20%. Figures are nominal, before inflation, fees and tax, and assume the rate holds
+      steady for the whole period. Not investment advice.
+    </footer>
+  </div>
 </div>
 
 <!-- ── Save As / Rename modal ─────────────────────────────────────────────── -->
@@ -2193,6 +2433,265 @@ window.addEventListener("beforeunload", (e) => {
   e.returnValue = "";
 });
 
+/* ── Compound interest calculator ───────────────────────────────────────── */
+/* A second product living in the same file, so the single-file phone copy,
+   the PWA shell and excel_bridge.py's one route all keep working unchanged. */
+const CALC_KEY = "projectionModel.calculator.v1";
+const CALC_DEFAULTS = { initial: 30000, monthly: 1500, years: 15, rate: 15, variance: 5 };
+const CALC_FIELDS = ["initial", "monthly", "years", "rate", "variance"];
+let calc = { ...CALC_DEFAULTS };
+
+/* Lightness ramp, not a hue ramp — stays separable under any colour-vision
+   deficiency, and the chart labels each line at its endpoint besides. */
+const CALC_SERIES = [
+  { key: "low",  label: "Low",  color: "#c08f2e" },
+  { key: "base", label: "Base", color: "#ffd966" },
+  { key: "high", label: "High", color: "#ffeda8" },
+];
+
+const money = (v) => !isFinite(v) ? EMDASH
+  : (v < 0 ? "−" : "") + "$" + Math.abs(v).toLocaleString("en-US", { maximumFractionDigits: 0 });
+
+const calcAxis = (v) => {
+  const a = Math.abs(v);
+  if (a >= 1e9) return "$" + (v / 1e9).toFixed(1) + "B";
+  if (a >= 1e6) return "$" + (v / 1e6).toFixed(2) + "M";
+  if (a >= 1e3) return "$" + (v / 1e3).toFixed(1) + "K";
+  return "$" + v.toFixed(0);
+};
+
+/* Balance at each year end. Interest compounds annually; each monthly
+   contribution grows for the fraction of the year it's actually invested,
+   which is the standard "annual compounding, monthly contributions" reading:
+   FV = P(1+r)^t + PMT · [((1+r)^t − 1) ÷ ((1+r)^(1/12) − 1)] */
+function compoundSeries(P, PMT, years, annualRatePct) {
+  const r = Math.max(-0.999999, annualRatePct / 100);
+  const out = [];
+  for (let t = 0; t <= years; t++) {
+    if (t === 0) { out.push(P); continue; }
+    if (Math.abs(r) < 1e-9) { out.push(P + PMT * 12 * t); continue; }
+    const g = Math.pow(1 + r, t);
+    const m = Math.pow(1 + r, 1 / 12) - 1;
+    out.push(P * g + PMT * ((g - 1) / m));
+  }
+  return out;
+}
+
+function calcResults() {
+  const P = Number(calc.initial) || 0;
+  const PMT = Number(calc.monthly) || 0;
+  const years = Math.max(0, Math.min(100, Math.floor(Number(calc.years) || 0)));
+  const base = Number(calc.rate) || 0;
+  const v = Math.abs(Number(calc.variance) || 0);
+  const rates = { low: base - v, base, high: base + v };
+  const series = {};
+  for (const s of CALC_SERIES) series[s.key] = compoundSeries(P, PMT, years, rates[s.key]);
+  return { series, rates, years, contributions: P + PMT * 12 * years };
+}
+
+function renderCalcCards(res) {
+  document.getElementById("calcCards").innerHTML = CALC_SERIES.map(s => {
+    const arr = res.series[s.key];
+    const final = arr[arr.length - 1];
+    return `<div class="calc-card" style="--accent:${s.color}">
+      <div class="calc-card-label">${s.label} projection · ${res.rates[s.key].toFixed(1)}%</div>
+      <div class="calc-card-value">${money(final)}</div>
+      <div class="calc-card-rows">
+        <div class="calc-row"><span class="k">Total contributions</span><span class="v">${money(res.contributions)}</span></div>
+        <div class="calc-row"><span class="k">Interest earned</span><span class="v">${money(final - res.contributions)}</span></div>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function renderCalcChart(res) {
+  const svg = document.getElementById("calcChart");
+  [...svg.childNodes].forEach(n => { if (!["title", "desc"].includes(n.nodeName)) n.remove(); });
+
+  const plotW = VB.w - PAD.l - PAD.r;
+  const plotH = VB.h - PAD.t - PAD.b;
+  const years = res.years;
+  const allVals = CALC_SERIES.flatMap(s => res.series[s.key]).filter(v => isFinite(v));
+
+  if (years < 1 || !allVals.length) {
+    const t = el("text", { x: VB.w / 2, y: VB.h / 2, "text-anchor": "middle",
+      fill: "#78776f", "font-size": "14", "font-family": "inherit", "font-weight": "600" });
+    t.textContent = "Enter a length of time to plot the projection";
+    svg.append(t);
+    return;
+  }
+
+  const ticks = niceTicks(Math.min(0, ...allVals), Math.max(...allVals), 5);
+  const yMin = ticks[0], yMax = ticks[ticks.length - 1];
+  const X = (i) => PAD.l + (plotW * i) / years;
+  const Y = (v) => PAD.t + plotH - ((v - yMin) / (yMax - yMin || 1)) * plotH;
+
+  const gGrid = el("g");
+  for (const tv of ticks) {
+    const y = Y(tv);
+    gGrid.append(el("line", { x1: PAD.l, y1: y, x2: PAD.l + plotW, y2: y,
+      stroke: "#2c2c2a", "stroke-width": "1", "shape-rendering": "crispEdges" }));
+    const lab = el("text", { x: PAD.l - 11, y: y + 4, "text-anchor": "end",
+      fill: "#78776f", "font-size": "11", "font-family": "inherit",
+      "font-variant-numeric": "tabular-nums" });
+    lab.textContent = calcAxis(tv);
+    gGrid.append(lab);
+  }
+  gGrid.append(el("line", { x1: PAD.l, y1: Y(yMin), x2: PAD.l + plotW, y2: Y(yMin),
+    stroke: "#383835", "stroke-width": "1", "shape-rendering": "crispEdges" }));
+  svg.append(gGrid);
+
+  // Thin the x labels so a 40-year run doesn't turn the axis into mush.
+  const step = Math.max(1, Math.ceil((years + 1) / 16));
+  const gX = el("g");
+  for (let i = 0; i <= years; i++) {
+    if (i % step !== 0 && i !== years) continue;
+    const lab = el("text", { x: X(i), y: PAD.t + plotH + 22, "text-anchor": "middle",
+      fill: "#78776f", "font-size": "11", "font-family": "inherit",
+      "font-variant-numeric": "tabular-nums" });
+    lab.textContent = String(i);
+    gX.append(lab);
+  }
+  svg.append(gX);
+
+  for (const s of CALC_SERIES) {
+    const arr = res.series[s.key];
+    const d = arr.map((v, i) => `${i ? "L" : "M"}${X(i).toFixed(2)},${Y(v).toFixed(2)}`).join(" ");
+    svg.append(el("path", { d, fill: "none", stroke: s.color, "stroke-width": "2.4",
+      "stroke-linejoin": "round", "stroke-linecap": "round" }));
+
+    // Dots only when they won't collide into a solid bar.
+    if (years <= 20) {
+      for (let i = 0; i <= years; i++) {
+        svg.append(el("circle", { cx: X(i), cy: Y(arr[i]), r: "3.1",
+          fill: s.color, stroke: "#16161a", "stroke-width": "1.4" }));
+      }
+    }
+
+    const endLab = el("text", { x: X(years) + 10, y: Y(arr[years]) + 4,
+      fill: s.color, "font-size": "12", "font-family": "inherit", "font-weight": "650" });
+    endLab.textContent = s.label;
+    svg.append(endLab);
+    const endVal = el("text", { x: X(years) + 10, y: Y(arr[years]) + 19,
+      fill: "#a9a8a1", "font-size": "11", "font-family": "inherit",
+      "font-variant-numeric": "tabular-nums" });
+    endVal.textContent = calcAxis(arr[years]);
+    svg.append(endVal);
+  }
+
+  document.getElementById("calcLegend").innerHTML = CALC_SERIES.map(s =>
+    `<span class="legend-item"><span class="swatch" style="background:${s.color}"></span>${s.label} · ${res.rates[s.key].toFixed(1)}%</span>`
+  ).join("");
+  document.getElementById("calcChartSub").textContent =
+    `${years} year${years === 1 ? "" : "s"} · ${money(res.contributions)} contributed`;
+}
+
+function renderCalculator() {
+  const res = calcResults();
+  renderCalcCards(res);
+  renderCalcChart(res);
+}
+
+function persistCalc() {
+  try { localStorage.setItem(CALC_KEY, JSON.stringify(calc)); } catch { /* quota */ }
+}
+
+function restoreCalc() {
+  try {
+    const s = JSON.parse(localStorage.getItem(CALC_KEY) || "null");
+    if (s) for (const f of CALC_FIELDS) if (isFinite(Number(s[f]))) calc[f] = Number(s[f]);
+  } catch { /* keep defaults */ }
+}
+
+function writeCalcInputs() {
+  for (const f of CALC_FIELDS) {
+    const inp = document.querySelector(`[data-calc="${f}"]`);
+    if (inp) inp.value = String(calc[f]);
+  }
+}
+
+function onCalcInput(ev) {
+  const inp = ev.target;
+  const f = inp.dataset.calc;
+  const raw = parseFloat(sanitizeNumericInput(inp));
+  inp.classList.toggle("is-invalid", inp.value.trim() !== "" && !isFinite(raw));
+  calc[f] = isFinite(raw) ? raw : 0;
+  persistCalc();
+  renderCalculator();
+}
+
+/* ── Product switcher ───────────────────────────────────────────────────── */
+const VIEW_KEY = "projectionModel.view.v1";
+const VIEWS = {
+  projection: { mark: "FP", title: "Projection Model",    sub: "Scenario terminal · 2026–2030" },
+  calculator: { mark: "CI", title: "Compound Calculator", sub: "Growth with regular contributions" },
+};
+let currentView = "projection";
+
+function setView(v) {
+  if (!VIEWS[v]) v = "projection";
+  currentView = v;
+  document.getElementById("viewProjection").hidden = v !== "projection";
+  document.getElementById("viewCalculator").hidden = v !== "calculator";
+  document.querySelectorAll("[data-view-only]").forEach(node => {
+    node.hidden = node.dataset.viewOnly !== v;
+  });
+  const meta = VIEWS[v];
+  document.getElementById("brandMark").textContent = meta.mark;
+  document.getElementById("productTitle").textContent = meta.title;
+  document.getElementById("productSub").textContent = meta.sub;
+  document.querySelectorAll(".product-item").forEach(b => {
+    b.setAttribute("aria-current", String(b.dataset.view === v));
+  });
+  try { localStorage.setItem(VIEW_KEY, v); } catch { /* private mode */ }
+  if (v === "calculator") renderCalculator();
+}
+
+function closeProductMenu() {
+  document.getElementById("productMenu").hidden = true;
+  document.getElementById("btnProduct").setAttribute("aria-expanded", "false");
+}
+
+document.getElementById("btnProduct").addEventListener("click", (e) => {
+  e.stopPropagation();
+  const menu = document.getElementById("productMenu");
+  const open = menu.hidden;
+  menu.hidden = !open;
+  e.currentTarget.setAttribute("aria-expanded", String(open));
+});
+document.querySelectorAll(".product-item").forEach(btn => {
+  btn.addEventListener("click", () => { setView(btn.dataset.view); closeProductMenu(); });
+});
+document.addEventListener("click", (e) => {
+  if (!e.target.closest(".brand-switch")) closeProductMenu();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeProductMenu();
+});
+
+document.querySelectorAll("[data-calc]").forEach(inp => {
+  inp.addEventListener("input", onCalcInput);
+  inp.addEventListener("focus", () => inp.select());
+});
+document.getElementById("btnCalcRun").addEventListener("click", () => {
+  writeCalcInputs();          // normalise whatever was typed
+  renderCalculator();
+  document.querySelectorAll(".calc-card").forEach(c => {
+    c.style.animation = "none";
+    void c.offsetWidth;       // reflow, so the animation can restart
+    c.style.animation = "";
+  });
+});
+document.getElementById("btnCalcReset").addEventListener("click", () => {
+  calc = { ...CALC_DEFAULTS };
+  writeCalcInputs();
+  persistCalc();
+  renderCalculator();
+});
+
+restoreCalc();
+writeCalcInputs();
+
 /* Boot: an explicitly opened named projection wins if one is set; otherwise
    fall back to the scratch autosave; otherwise sample figures (clearly
    badged) so the layout is legible. Then try to upgrade to real workbook
@@ -2238,6 +2737,10 @@ if (!bootedFromProject) {
     } catch {}
   }
 })();
+
+/* Come back to whichever product you were last using. */
+try { setView(localStorage.getItem(VIEW_KEY) || "projection"); }
+catch { setView("projection"); }
 
 /* Installable PWA — only works served over http(s) (i.e. via excel_bridge.py);
    silently skipped on file:// or if the browser lacks the API. This is what
