@@ -645,6 +645,32 @@ td.cellinput { padding: 4px 6px; }
 
 .rowlabel-note { font-size: 10.5px; color: var(--text-muted); font-weight: 400; display: block; }
 
+/* ── Cash flow / net worth ───────────────────────────────────────────────
+   Same card system as Company Inputs, re-accented green so the personal-money
+   block never reads as part of the equity model above it. */
+.kpi.nw::after { background: linear-gradient(90deg, var(--bull), transparent 72%); }
+.kpi.nw:hover { border-color: rgba(6,176,122,.34); }
+.kpi.nw .kpi-input:focus {
+  border-color: #06b07a;
+  box-shadow: 0 0 0 3px rgba(6,176,122,.16);
+}
+.kpi.nw.derived .kpi-value { color: #06b07a; }
+.kpi-field { display: flex; align-items: baseline; gap: 3px; }
+.kpi-field .kpi-input { flex: 1 1 auto; min-width: 0; }
+.kpi-affix {
+  flex: none; font-size: 19px; font-weight: 600; letter-spacing: -.4px;
+  color: var(--text-muted); transition: color .18s var(--ease);
+}
+.kpi.nw:focus-within .kpi-affix { color: #06b07a; }
+.kpi.nw .kpi-foot {
+  font-size: 11px; color: var(--text-muted); margin-top: 7px;
+  font-variant-numeric: tabular-nums;
+}
+.kpi.nw .kpi-foot.pos { color: #06b07a; }
+.kpi.nw .kpi-foot.neg { color: #d43232; }
+table.summary td.nw-total { color: #06b07a; font-weight: 680; }
+table.summary td.nw-neg { color: #d43232; font-weight: 680; }
+
 /* ── Summary table ───────────────────────────────────────────────────────── */
 table.summary { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
 table.summary th, table.summary td { padding: 10px 13px; text-align: right; white-space: nowrap; }
@@ -966,6 +992,59 @@ footer.legal code {
   </div>
   <div id="scenarios"></div>
 
+  <!-- ── Cash flow & net worth ───────────────────────────────────────── -->
+  <div class="section-head">
+    <h2>Cash Flow &amp; Net Worth</h2>
+    <span class="hint">Your own money — set what you take in and what you keep, the rest is calculated</span>
+    <span class="rule"></span>
+    <div class="seg" id="periodSeg" role="group" aria-label="Pay period">
+      <button data-period="biweekly" aria-pressed="false">Every 2 weeks</button>
+      <button data-period="semimonthly" aria-pressed="false">Twice a month</button>
+      <button data-period="monthly" aria-pressed="true">Monthly</button>
+    </div>
+    <button id="btnNwReset" class="lock-btn" title="Clear the cash flow figures">Clear</button>
+  </div>
+  <div class="kpi-grid" id="nwGrid"></div>
+
+  <div class="controls">
+    <div class="section-head" style="margin:0">
+      <h2>Net worth path</h2>
+    </div>
+    <div class="seg" id="horizonSeg" role="group" aria-label="Projection horizon">
+      <button data-yrs="1"  aria-pressed="false">1 yr</button>
+      <button data-yrs="5"  aria-pressed="true">5 yr</button>
+      <button data-yrs="10" aria-pressed="false">10 yr</button>
+      <button data-yrs="20" aria-pressed="false">20 yr</button>
+      <button data-yrs="30" aria-pressed="false">30 yr</button>
+    </div>
+    <span class="hint" style="color:var(--text-muted);font-size:11.5px">
+      Hover or focus the chart and use ← → to read values
+    </span>
+  </div>
+
+  <div class="card">
+    <div class="chart-wrap">
+      <svg id="nwChart" viewBox="0 0 920 300" role="img" aria-labelledby="nwChartTitle nwChartDesc" tabindex="0">
+        <title id="nwChartTitle">Net worth projection chart</title>
+        <desc id="nwChartDesc">Projected net worth over the selected horizon, against the same savings with no investment return. Full values are in the table below.</desc>
+      </svg>
+      <div id="nwTooltip" class="tooltip" role="status" aria-live="polite"></div>
+    </div>
+    <div class="chart-legend" id="nwLegend"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <h3>Year by year</h3>
+      <span class="sub" id="nwSub"></span>
+    </div>
+    <div class="card-body" style="padding:4px 6px 6px">
+      <div class="table-scroll">
+        <table class="summary" id="nwTable"></table>
+      </div>
+    </div>
+  </div>
+
   <footer class="legal">
     <strong style="color:var(--text-secondary)">Formula parity with the workbook.</strong>
     Revenue<sub>t</sub> = Revenue<sub>t−1</sub> × (1 + growth<sub>t</sub>) ·
@@ -980,6 +1059,14 @@ footer.legal code {
     The workbook leaves 2028–2030 growth and P/E blank as <em>ENTER VALUES</em> placeholders; this app carries the
     prior year's assumption forward so the projection is never dead, and every carried cell is editable above.
     Share counts are held flat across all five years, as in the workbook.
+    <br><br>
+    <strong style="color:var(--text-secondary)">Cash flow &amp; net worth</strong> is your own money and is
+    separate from the equity model — figures there are <strong>actual dollars</strong>, not millions.
+    Net&nbsp;Worth<sub>p</sub> = Net&nbsp;Worth<sub>p−1</sub> × (1 + r) + (income − expenses), applied once per pay period,
+    where r = (1 + annual&nbsp;return)<sup>1/periods per year</sup> − 1 — so switching between monthly and bi-weekly
+    changes when money lands, never the annual return itself. Income and expenses are held flat across the horizon;
+    <em>Savings only</em> is the same money with the return set to zero, so the gap between the two lines is the
+    compounding. This is a projection, not advice or a guarantee — real returns vary year to year.
   </footer>
 
   </div><!-- /#viewProjection -->
@@ -1336,7 +1423,7 @@ let savedSnapshot = null;   // stateJSON() at last load/save, for the dirty chec
 function persist() {
   try {
     localStorage.setItem(STORE_KEY, JSON.stringify({
-      company, assumptions, locked, dataSource, savedAt: Date.now(),
+      company, assumptions, locked, dataSource, netWorth: nw, savedAt: Date.now(),
     }));
   } catch { /* private mode / quota — non-fatal */ }
   updateDirtyUI();
@@ -1359,6 +1446,7 @@ function restore() {
         }
       }
     }
+    if (s.netWorth && typeof s.netWorth === "object") nw = normalizeNW(s.netWorth);
     dataSource = s.dataSource === "sample" ? "sample" : (s.dataSource || "manual");
     return true;
   } catch { return false; }
@@ -1384,7 +1472,7 @@ function cloneAssumptions() {
   return JSON.parse(JSON.stringify(assumptions));
 }
 function stateJSON() {
-  return JSON.stringify({ company, assumptions, locked });
+  return JSON.stringify({ company, assumptions, locked, netWorth: nw });
 }
 function markClean() { savedSnapshot = stateJSON(); updateDirtyUI(); }
 function isDirty() { return currentProjectId !== null && stateJSON() !== savedSnapshot; }
@@ -1468,6 +1556,7 @@ function saveAsNew(name) {
   map[id] = {
     id, name: name.trim() || "Untitled", ticker: company.ticker,
     company: { ...company }, assumptions: cloneAssumptions(), locked,
+    netWorth: { ...nw },
     createdAt: now, updatedAt: now,
   };
   saveProjectsMap(map);
@@ -1485,6 +1574,7 @@ function saveOverActive() {
   map[currentProjectId] = {
     ...existing, ticker: company.ticker,
     company: { ...company }, assumptions: cloneAssumptions(), locked,
+    netWorth: { ...nw },
     updatedAt: Date.now(),
   };
   saveProjectsMap(map);
@@ -1499,6 +1589,7 @@ function loadProjectById(id) {
   if (!p) return false;
   company = { ...company, ...p.company };
   locked = !!p.locked;
+  nw = p.netWorth ? normalizeNW(p.netWorth) : { ...NW_DEFAULTS };
   if (p.assumptions) {
     for (const k of ["base", "bear", "bull"]) {
       if (!p.assumptions[k]) continue;
@@ -1524,6 +1615,7 @@ function loadProjectById(id) {
    untitled one that were never saved at all. Sample data never counts. */
 function hasWorkWorthKeeping() {
   if (currentProjectId) return isDirty();
+  if (nw.start || nw.income || nw.expenses) return true;
   if (dataSource === "sample") return false;
   return !!(company.revenue || company.netIncome || company.eps || company.shares);
 }
@@ -1541,6 +1633,7 @@ function startNewProject() {
   assumptions.bear = mkAssumptions(0.03, 8, 12);
   assumptions.bull = mkAssumptions(0.18, 20, 28);
   locked = false;
+  nw = { ...NW_DEFAULTS };
   dataSource = "manual";
   setActiveProject(null);
   document.getElementById("ticker").value = "";
@@ -2210,11 +2303,412 @@ function toast(msg) {
    Full structural rebuild — only for moments that actually change DOM shape
    (boot, project load, lock toggle). Per-keystroke updates go through
    updateDerivedCells()/updateDerivedKPI() instead, which never touch inputs. */
+
+/* ══ Cash flow & net worth ═══════════════════════════════════════════════
+   Independent of the equity model above — this is the user's own money.
+   Each period the balance earns a return, then the period's net savings are
+   added:  NW(p) = NW(p-1) × (1 + r) + (income − expenses)
+   r is the annual rate stepped down to the pay period, so switching between
+   monthly and bi-weekly never changes the annual return you actually get. */
+const PERIOD_META = {
+  biweekly:    { perYear: 26, label: "every 2 weeks", short: "/ 2 wks",   noun: "paycheque" },
+  semimonthly: { perYear: 24, label: "twice a month", short: "/ half-mo", noun: "paycheque" },
+  monthly:     { perYear: 12, label: "per month",     short: "/ mo",      noun: "month" },
+};
+const NW_DEFAULTS = { period: "monthly", start: 0, income: 0, expenses: 0, ret: 6, horizon: 5 };
+let nw = { ...NW_DEFAULTS };
+let nwResults = null;
+let nwHoverIdx = null;
+
+const nwMeta = () => PERIOD_META[nw.period] || PERIOD_META.monthly;
+
+/* Saved files may predate this section, come from an older version, or have
+   been hand-edited in an exported .json — take only what's usable. */
+function normalizeNW(raw) {
+  const out = { ...NW_DEFAULTS };
+  if (!raw || typeof raw !== "object") return out;
+  if (PERIOD_META[raw.period]) out.period = raw.period;
+  if ([1, 5, 10, 20, 30].includes(+raw.horizon)) out.horizon = +raw.horizon;
+  for (const f of ["start", "income", "expenses", "ret"]) {
+    const v = Number(raw[f]);
+    if (isFinite(v)) out[f] = v;
+  }
+  return out;
+}
+const NW_BASE_YEAR = new Date().getFullYear();
+
+function computeNetWorth() {
+  const ppy = nwMeta().perYear;
+  const rPeriod = Math.pow(1 + nw.ret / 100, 1 / ppy) - 1;
+  const perPeriod = nw.income - nw.expenses;
+  const years = nw.horizon;
+
+  const netWorth = [nw.start], saved = [0], growth = [0], noReturn = [nw.start];
+  let bal = nw.start, savedTot = 0, growthTot = 0;
+
+  for (let y = 1; y <= years; y++) {
+    for (let p = 0; p < ppy; p++) {
+      const gain = bal * rPeriod;
+      bal += gain + perPeriod;
+      growthTot += gain;
+      savedTot += perPeriod;
+    }
+    netWorth.push(bal);
+    saved.push(savedTot);
+    growth.push(growthTot);
+    noReturn.push(nw.start + perPeriod * ppy * y);
+  }
+  return {
+    years, ppy, perPeriod, rPeriod, netWorth, saved, growth, noReturn,
+    final: netWorth[years],
+    savingsRate: nw.income > 0 ? perPeriod / nw.income : 0,
+  };
+}
+function recomputeNW() { nwResults = computeNetWorth(); }
+
+const fmtMoney = (v) => !isFinite(v) ? EMDASH
+  : (v < 0 ? "\u2212" : "") + "$" + Math.abs(Math.round(v)).toLocaleString("en-US");
+const fmtMoneyShort = (v) => {
+  if (!isFinite(v)) return EMDASH;
+  const sign = v < 0 ? "\u2212" : "", a = Math.abs(v);
+  if (a >= 1e9) return sign + "$" + (a / 1e9).toFixed(1) + "B";
+  if (a >= 1e6) return sign + "$" + (a / 1e6).toFixed(a >= 1e7 ? 0 : 1) + "M";
+  if (a >= 1e3) return sign + "$" + Math.round(a / 1e3) + "k";
+  return sign + "$" + Math.round(a);
+};
+
+/* ── Input cards ────────────────────────────────────────────────────────── */
+function renderNWCards() {
+  const m = nwMeta();
+  const cards = [
+    { f: "start",    label: "Current net worth", unit: "What you own minus what you owe", pre: "$" },
+    { f: "income",   label: "Income " + m.short, unit: "Take-home pay, " + m.label,        pre: "$" },
+    { f: "expenses", label: "Expenses " + m.short, unit: "Everything that goes back out",  pre: "$" },
+    { f: "ret",      label: "Annual return",    unit: "What the invested part earns",      suf: "%" },
+  ];
+
+  const editable = cards.map(c => {
+    const v = nw[c.f];
+    return `<div class="kpi nw">
+      <div class="kpi-label">${c.label}</div>
+      <div class="kpi-field">
+        ${c.pre ? `<span class="kpi-affix" aria-hidden="true">${c.pre}</span>` : ""}
+        <input class="kpi-input" type="text" inputmode="decimal" data-nw="${c.f}"
+               value="${v === 0 ? "" : v}" placeholder="0"
+               aria-label="${c.label}${c.pre ? " in dollars" : ""}${c.suf ? " in percent" : ""}"
+               autocomplete="off" spellcheck="false">
+        ${c.suf ? `<span class="kpi-affix" aria-hidden="true">${c.suf}</span>` : ""}
+      </div>
+      <div class="kpi-unit">${c.unit}</div>
+    </div>`;
+  }).join("");
+
+  const r = nwResults;
+  const rateNote = nw.income > 0
+    ? `${(r.savingsRate * 100).toFixed(0)}% of what you take in`
+    : "Add your income to see a savings rate";
+  const perCls = r.perPeriod > 0 ? "pos" : r.perPeriod < 0 ? "neg" : "";
+  const growthShare = r.final !== 0 ? r.growth[r.years] / Math.abs(r.final) : 0;
+
+  const derived = `
+    <div class="kpi nw derived">
+      <div class="kpi-label">Kept ${m.short}</div>
+      <div class="kpi-value${r.perPeriod === 0 ? " is-empty" : ""}" id="nwPerPeriod">${r.perPeriod === 0 ? EMDASH : fmtMoney(r.perPeriod)}</div>
+      <div class="kpi-foot ${perCls}" id="nwRate">${rateNote}</div>
+    </div>
+    <div class="kpi nw derived">
+      <div class="kpi-label">Net worth in ${r.years} ${r.years === 1 ? "year" : "years"}</div>
+      <div class="kpi-value${r.final === 0 ? " is-empty" : ""}" id="nwFinal">${r.final === 0 ? EMDASH : fmtMoney(r.final)}</div>
+      <div class="kpi-foot" id="nwGrowthShare">${
+        r.growth[r.years] > 0
+          ? `${fmtMoney(r.growth[r.years])} of that is return \u2014 ${(growthShare * 100).toFixed(0)}%`
+          : "Returns compound on top of what you save"
+      }</div>
+    </div>`;
+
+  document.getElementById("nwGrid").innerHTML = editable + derived;
+
+  document.querySelectorAll("[data-nw]").forEach(inp => {
+    inp.addEventListener("input", onNWEdit);
+    inp.addEventListener("blur", () => {
+      const v = nw[inp.dataset.nw];
+      inp.value = v === 0 ? "" : String(v);
+    });
+  });
+}
+
+function onNWEdit(ev) {
+  const inp = ev.target;
+  const field = inp.dataset.nw;
+  const raw = parseFloat(sanitizeNumericInput(inp));
+  nw[field] = isFinite(raw) ? raw : 0;
+  recomputeNW();
+  persist();
+  updateNWDerived();
+  renderNWChart();
+  renderNWTable();
+}
+
+function updateNWDerived() {
+  const r = nwResults, m = nwMeta();
+  const per = document.getElementById("nwPerPeriod");
+  if (per) {
+    per.textContent = r.perPeriod === 0 ? EMDASH : fmtMoney(r.perPeriod);
+    per.classList.toggle("is-empty", r.perPeriod === 0);
+  }
+  const rate = document.getElementById("nwRate");
+  if (rate) {
+    rate.textContent = nw.income > 0
+      ? `${(r.savingsRate * 100).toFixed(0)}% of what you take in`
+      : "Add your income to see a savings rate";
+    rate.className = "kpi-foot " + (r.perPeriod > 0 ? "pos" : r.perPeriod < 0 ? "neg" : "");
+  }
+  const fin = document.getElementById("nwFinal");
+  if (fin) {
+    fin.textContent = r.final === 0 ? EMDASH : fmtMoney(r.final);
+    fin.classList.toggle("is-empty", r.final === 0);
+  }
+  const gs = document.getElementById("nwGrowthShare");
+  if (gs) {
+    const share = r.final !== 0 ? r.growth[r.years] / Math.abs(r.final) : 0;
+    gs.textContent = r.growth[r.years] > 0
+      ? `${fmtMoney(r.growth[r.years])} of that is return \u2014 ${(share * 100).toFixed(0)}%`
+      : "Returns compound on top of what you save";
+  }
+  const sub = document.getElementById("nwSub");
+  if (sub) {
+    sub.textContent = r.perPeriod === 0
+      ? `${r.ppy ? r.ppy : 12} periods a year`
+      : `${fmtMoney(r.perPeriod)} ${m.label} \u00b7 ${nw.ret}% a year \u00b7 ${r.years}-year horizon`;
+  }
+}
+
+/* ── Chart ──────────────────────────────────────────────────────────────── */
+const NW_VB = { w: 920, h: 300 };
+const NW_PAD = { t: 24, r: 132, b: 38, l: 78 };
+
+function renderNWChart() {
+  const svg = document.getElementById("nwChart");
+  if (!svg) return;
+  [...svg.childNodes].forEach(n => { if (!["title", "desc"].includes(n.nodeName)) n.remove(); });
+
+  const r = nwResults;
+  const plotW = NW_VB.w - NW_PAD.l - NW_PAD.r;
+  const plotH = NW_VB.h - NW_PAD.t - NW_PAD.b;
+  const N = r.years + 1;
+
+  const allVals = [...r.netWorth, ...r.noReturn].filter(v => isFinite(v));
+  const hasNW = allVals.some(v => v !== 0);
+
+  if (!hasNW) {
+    const g = el("g");
+    const t1 = el("text", { x: NW_VB.w / 2, y: NW_VB.h / 2 - 8, "text-anchor": "middle",
+      fill: "#78776f", "font-size": "15", "font-weight": "600" });
+    t1.textContent = "No cash flow entered yet";
+    const t2 = el("text", { x: NW_VB.w / 2, y: NW_VB.h / 2 + 14, "text-anchor": "middle",
+      fill: "#5c5b55", "font-size": "12.5" });
+    t2.textContent = "Fill in your net worth and income above and the path draws itself";
+    g.append(t1, t2);
+    svg.appendChild(g);
+    renderNWLegend(false);
+    return;
+  }
+
+  const ticks = niceTicks(Math.min(0, ...allVals), Math.max(...allVals), 5);
+  const yMin = ticks[0], yMax = ticks[ticks.length - 1];
+  const X = (i) => NW_PAD.l + (plotW * i) / (N - 1 || 1);
+  const Y = (v) => NW_PAD.t + plotH - ((v - yMin) / (yMax - yMin || 1)) * plotH;
+
+  const gGrid = el("g");
+  for (const tv of ticks) {
+    const y = Y(tv);
+    gGrid.appendChild(el("line", { x1: NW_PAD.l, x2: NW_PAD.l + plotW, y1: y, y2: y,
+      stroke: tv === 0 ? "#383835" : "#2c2c2a", "stroke-width": "1" }));
+    const lab = el("text", { x: NW_PAD.l - 11, y: y + 4, "text-anchor": "end",
+      fill: "#78776f", "font-size": "11", "font-variant-numeric": "tabular-nums" });
+    lab.textContent = fmtMoneyShort(tv);
+    gGrid.appendChild(lab);
+  }
+  svg.appendChild(gGrid);
+
+  const gX = el("g");
+  const step = N > 12 ? Math.ceil(N / 11) : 1;
+  for (let i = 0; i < N; i++) {
+    if (i % step !== 0 && i !== N - 1) continue;
+    const t = el("text", { x: X(i), y: NW_VB.h - NW_PAD.b + 21, "text-anchor": "middle",
+      fill: "#78776f", "font-size": "11.5", "font-variant-numeric": "tabular-nums" });
+    t.textContent = i === 0 ? "Now" : String(NW_BASE_YEAR + i);
+    gX.appendChild(t);
+  }
+  svg.appendChild(gX);
+
+  svg.appendChild(el("line", { id: "nwCrosshair", stroke: "#4a4a46", "stroke-width": "1",
+    "stroke-dasharray": "3 3", y1: NW_PAD.t, y2: NW_PAD.t + plotH, x1: 0, x2: 0, opacity: "0" }));
+
+  const series = [
+    { key: "noReturn", vals: r.noReturn, color: "#3987e5", label: "Savings only", dash: "5 4" },
+    { key: "netWorth", vals: r.netWorth, color: "#ffd966", label: "Net worth",    dash: null },
+  ];
+
+  for (const s of series) {
+    const d = s.vals.map((v, i) => `${i ? "L" : "M"}${X(i).toFixed(2)},${Y(v).toFixed(2)}`).join(" ");
+    const p = el("path", { d, fill: "none", stroke: s.color, "stroke-width": s.dash ? "1.8" : "2.6",
+      "stroke-linejoin": "round", "stroke-linecap": "round" });
+    if (s.dash) p.setAttribute("stroke-dasharray", s.dash);
+    svg.appendChild(p);
+  }
+  for (const s of series) {
+    s.vals.forEach((v, i) => {
+      svg.appendChild(el("circle", { cx: X(i), cy: Y(v), r: s.dash ? "2.6" : "3.4",
+        fill: s.color, stroke: "#16161a", "stroke-width": "1.6" }));
+    });
+  }
+
+  const ends = series.map(s => ({ s, y: Y(s.vals[N - 1]), v: s.vals[N - 1] }))
+                     .sort((a, b) => a.y - b.y);
+  for (let i = 1; i < ends.length; i++) {
+    if (ends[i].y - ends[i - 1].y < 26) ends[i].y = ends[i - 1].y + 26;
+  }
+  for (const e of ends) {
+    const g = el("g");
+    const name = el("text", { x: NW_PAD.l + plotW + 14, y: e.y - 2, fill: e.s.color,
+      "font-size": "11.5", "font-weight": "650" });
+    name.textContent = e.s.label;
+    const val = el("text", { x: NW_PAD.l + plotW + 14, y: e.y + 12, fill: "#a9a8a1",
+      "font-size": "11", "font-variant-numeric": "tabular-nums" });
+    val.textContent = fmtMoneyShort(e.v);
+    g.append(name, val);
+    svg.appendChild(g);
+  }
+
+  const gHit = el("g");
+  for (let i = 0; i < N; i++) {
+    const bw = plotW / (N - 1 || 1);
+    gHit.appendChild(el("rect", {
+      x: X(i) - bw / 2, y: NW_PAD.t, width: bw, height: plotH,
+      fill: "transparent", "data-nwhit": String(i),
+    }));
+  }
+  svg.appendChild(gHit);
+  attachNWHover(X);
+  renderNWLegend(true);
+}
+
+function renderNWLegend(active) {
+  const items = [
+    { color: "#ffd966", label: "Net worth", note: "savings plus compounding return" },
+    { color: "#3987e5", label: "Savings only", note: "the same money with no return" },
+  ];
+  document.getElementById("nwLegend").innerHTML = items.map(s => `
+    <span class="legend-item" style="opacity:${active ? 1 : .45}">
+      <span class="swatch" style="background:${s.color}"></span>
+      <span class="marker" style="background:${s.color}"></span>
+      <strong style="color:${s.color};font-weight:650">${s.label}</strong>
+      <span style="color:var(--text-muted)">\u2014 ${s.note}</span>
+    </span>`).join("");
+}
+
+function attachNWHover(X) {
+  const svg = document.getElementById("nwChart");
+  svg.querySelectorAll("[data-nwhit]").forEach(rect => {
+    const i = +rect.getAttribute("data-nwhit");
+    rect.addEventListener("mouseenter", () => { nwHoverIdx = i; showNWTooltip(i, X); });
+    rect.addEventListener("mousemove", () => { nwHoverIdx = i; showNWTooltip(i, X); });
+  });
+  svg.addEventListener("mouseleave", hideNWTooltip);
+  svg.addEventListener("blur", hideNWTooltip);
+  svg.addEventListener("keydown", (e) => {
+    const N = nwResults.years + 1;
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    const cur = nwHoverIdx === null ? 0 : nwHoverIdx;
+    nwHoverIdx = Math.min(N - 1, Math.max(0, cur + (e.key === "ArrowRight" ? 1 : -1)));
+    showNWTooltip(nwHoverIdx, X);
+  });
+}
+
+function showNWTooltip(i, X) {
+  const tip = document.getElementById("nwTooltip");
+  const svg = document.getElementById("nwChart");
+  const ch = svg.querySelector("#nwCrosshair");
+  if (ch) { ch.setAttribute("x1", X(i)); ch.setAttribute("x2", X(i)); ch.setAttribute("opacity", "1"); }
+
+  const r = nwResults;
+  const rows = [
+    { c: "#ffd966", n: "Net worth",    v: fmtMoney(r.netWorth[i]) },
+    { c: "#3987e5", n: "Savings only", v: fmtMoney(r.noReturn[i]) },
+    { c: "#06b07a", n: "Return earned", v: fmtMoney(r.growth[i]) },
+  ].map(x => `<div class="tt-row">
+      <span class="swatch" style="background:${x.c}"></span>
+      <span class="name">${x.n}</span>
+      <span class="val">${x.v}</span>
+    </div>`).join("");
+  tip.innerHTML = `<div class="tt-year">${i === 0 ? "Today" : NW_BASE_YEAR + i}</div>${rows}`;
+  tip.classList.add("show");
+
+  const rect = svg.getBoundingClientRect();
+  const scale = rect.width / NW_VB.w;
+  const cx = X(i) * scale;
+  tip.style.left = Math.min(Math.max(cx + 16, 8), rect.width - tip.offsetWidth - 8) + "px";
+  tip.style.top = (NW_PAD.t * scale + 8) + "px";
+}
+function hideNWTooltip() {
+  nwHoverIdx = null;
+  const tip = document.getElementById("nwTooltip");
+  if (tip) tip.classList.remove("show");
+  const ch = document.querySelector("#nwCrosshair");
+  if (ch) ch.setAttribute("opacity", "0");
+}
+
+/* ── Year-by-year table ─────────────────────────────────────────────────── */
+function renderNWTable() {
+  const t = document.getElementById("nwTable");
+  if (!t) return;
+  const r = nwResults;
+  const rows = [];
+  for (let i = 1; i <= r.years; i++) {
+    const yearSaved = r.saved[i] - r.saved[i - 1];
+    const yearGrowth = r.growth[i] - r.growth[i - 1];
+    rows.push(`<tr>
+      <th>${NW_BASE_YEAR + i}</th>
+      <td>${fmtMoney(yearSaved)}</td>
+      <td>${fmtMoney(yearGrowth)}</td>
+      <td class="${r.netWorth[i] < 0 ? "nw-neg" : "nw-total"}">${fmtMoney(r.netWorth[i])}</td>
+    </tr>`);
+  }
+  t.innerHTML = `
+    <thead><tr>
+      <th>Year</th><th>Saved</th><th>Return earned</th><th>Net worth</th>
+    </tr></thead>
+    <tbody>
+      <tr><th>Today</th><td>${EMDASH}</td><td>${EMDASH}</td>
+          <td class="${nw.start < 0 ? "nw-neg" : "nw-total"}">${fmtMoney(nw.start)}</td></tr>
+      ${rows.join("")}
+    </tbody>`;
+}
+
+function renderNW() {
+  renderNWCards();
+  renderNWChart();
+  renderNWTable();
+  updateNWDerived();
+}
+
+function applyPeriodUI() {
+  document.querySelectorAll("#periodSeg button").forEach(b =>
+    b.setAttribute("aria-pressed", String(b.dataset.period === nw.period)));
+  document.querySelectorAll("#horizonSeg button").forEach(b =>
+    b.setAttribute("aria-pressed", String(+b.dataset.yrs === nw.horizon)));
+}
+
 function renderAll() {
   renderKPIs();
   renderChart();
   renderSummary();
   renderScenarios();
+  recomputeNW();
+  applyPeriodUI();
+  renderNW();
 }
 
 /* ── Wire up ────────────────────────────────────────────────────────────── */
@@ -2226,6 +2720,36 @@ document.getElementById("metricSeg").addEventListener("click", (ev) => {
     x.setAttribute("aria-pressed", String(x === b)));
   hideTooltip();
   renderChart();
+});
+document.getElementById("periodSeg").addEventListener("click", (ev) => {
+  const b = ev.target.closest("button[data-period]");
+  if (!b || b.dataset.period === nw.period) return;
+  nw.period = b.dataset.period;
+  applyPeriodUI();
+  recomputeNW();
+  persist();
+  hideNWTooltip();
+  renderNW();
+});
+document.getElementById("horizonSeg").addEventListener("click", (ev) => {
+  const b = ev.target.closest("button[data-yrs]");
+  if (!b || +b.dataset.yrs === nw.horizon) return;
+  nw.horizon = +b.dataset.yrs;
+  applyPeriodUI();
+  recomputeNW();
+  persist();
+  hideNWTooltip();
+  renderNW();
+});
+document.getElementById("btnNwReset").addEventListener("click", () => {
+  const hasNW = nw.start || nw.income || nw.expenses;
+  if (hasNW && !confirm("Clear your net worth, income and expenses? The rest of the projection stays as it is.")) return;
+  nw = { ...NW_DEFAULTS, period: nw.period, horizon: nw.horizon };
+  recomputeNW();
+  persist();
+  hideNWTooltip();
+  renderNW();
+  flashToast("Cash flow cleared.");
 });
 document.getElementById("btnRefresh").addEventListener("click", doRefresh);
 document.getElementById("btnLock").addEventListener("click", toggleLock);
