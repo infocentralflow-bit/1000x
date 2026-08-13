@@ -131,11 +131,17 @@ SAVES_DIR = os.path.join(HERE, "saves")
 PROJECT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
 
 # On a cloud host the filesystem is wiped on every restart and redeploy, so the
-# files above can't be the storage layer there. Set DATABASE_URL and projections
-# go to Postgres instead, which is what actually makes them survive a restart
-# and show up on your other devices. Left unset — the normal local/OneDrive
-# setup — nothing changes and the files stay the storage.
-DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+# files above can't be the storage layer there. Set NEON_DATABASE_URL and
+# projections go to Postgres instead, which is what actually makes them survive
+# a restart and show up on your other devices. Left unset — the normal
+# local/OneDrive setup — nothing changes and the files stay the storage.
+#
+# Deliberately NOT named DATABASE_URL: Render reserves that exact key for its
+# own native "connect a Render Postgres" env-var link and silently drops a
+# manually-entered value under that name — it never reaches the process (verified
+# by dumping os.environ.keys() at boot: every other var we set showed up,
+# DATABASE_URL alone did not, with an external/Neon database behind it).
+DATABASE_URL = (os.environ.get("NEON_DATABASE_URL") or os.environ.get("DATABASE_URL") or "").strip()
 USE_PG = bool(DATABASE_URL)
 _pg_error = None
 
@@ -755,19 +761,16 @@ def main():
         if not IS_CLOUD:
             print("             enable the Excel path with:  pip install pywin32")
 
-    print(f"  [diag]   : DEBUG_PING={os.environ.get('DEBUG_PING', '<unset>')!r} "
-          f"DATABASE_URL_len={len(DATABASE_URL)} env_keys={sorted(os.environ.keys())}")
-
     if USE_PG:
         ok, err = pg_init()
         if ok:
-            print("  saves    : Postgres (DATABASE_URL) — synced across devices")
+            print("  saves    : Postgres (NEON_DATABASE_URL) — synced across devices")
         else:
             print("  saves    : Postgres CONFIGURED BUT UNREACHABLE — saving will fail")
             print(f"             {err}")
     elif IS_CLOUD:
         print("  saves    : local files — WIPED ON EVERY RESTART on this host.")
-        print("             set DATABASE_URL to keep them and sync across devices.")
+        print("             set NEON_DATABASE_URL to keep them and sync across devices.")
     else:
         print(f"  saves    : {SAVES_DIR}")
 
