@@ -671,6 +671,17 @@ td.cellinput { padding: 4px 6px; }
 table.summary td.nw-total { color: #06b07a; font-weight: 680; }
 table.summary td.nw-neg { color: #d43232; font-weight: 680; }
 
+/* ── Monthly actuals log ─────────────────────────────────────────────────── */
+.nwlog-form {
+  display: grid; gap: 14px; align-items: end;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+.nwlog-form .calc-field { margin-bottom: 0; }
+.nwlog-form .calc-actions { grid-column: 1 / -1; margin: 4px 0 0; }
+table.summary td.nwlog-actions { text-align: right; white-space: nowrap; padding-right: 8px; }
+table.summary td.nwlog-actions .fill-btn { font-size: 11px; }
+table.summary td.nwlog-actions .fill-btn + .fill-btn { margin-left: 5px; }
+
 /* ── Summary table ───────────────────────────────────────────────────────── */
 table.summary { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
 table.summary th, table.summary td { padding: 10px 13px; text-align: right; white-space: nowrap; }
@@ -1149,6 +1160,68 @@ footer.legal code {
       </div>
     </div>
 
+    <!-- ── Monthly actuals ────────────────────────────────────────────── -->
+    <div class="section-head">
+      <h2>Monthly Actuals</h2>
+      <span class="hint">Log what really happened each month — insights build up as you go, past months included</span>
+      <span class="rule"></span>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><span class="scenario-chip">LOG A MONTH</span></div>
+      <div class="card-body">
+        <div class="nwlog-form" id="nwLogForm">
+          <div class="calc-field">
+            <label for="nwLogMonth">Month</label>
+            <input id="nwLogMonth" class="calc-input" type="month" autocomplete="off">
+          </div>
+          <div class="calc-field">
+            <label for="nwLogIncome">Actual income</label>
+            <input id="nwLogIncome" class="calc-input" type="text" inputmode="decimal" autocomplete="off" placeholder="0">
+          </div>
+          <div class="calc-field">
+            <label for="nwLogExpenses">Actual expenses</label>
+            <input id="nwLogExpenses" class="calc-input" type="text" inputmode="decimal" autocomplete="off" placeholder="0">
+          </div>
+          <div class="calc-field">
+            <label for="nwLogNetWorth">Net worth snapshot <span style="text-transform:none;font-weight:400">(optional)</span></label>
+            <input id="nwLogNetWorth" class="calc-input" type="text" inputmode="decimal" autocomplete="off" placeholder="Leave blank to skip">
+          </div>
+          <div class="calc-actions">
+            <button id="btnNwLogSave" class="btn btn-primary" type="button">Save month</button>
+            <button id="btnNwLogClear" class="btn btn-ghost" type="button">Clear form</button>
+          </div>
+        </div>
+        <div class="calc-hint">Picking a month that's already logged overwrites that entry — handy for correcting a past month.</div>
+      </div>
+    </div>
+
+    <div class="kpi-grid" id="nwLogInsights"></div>
+
+    <div class="card" id="nwLogChartCard" hidden>
+      <div class="card-head">
+        <h3>Saved per month</h3>
+        <span class="sub" id="nwLogChartSub"></span>
+      </div>
+      <div class="chart-wrap">
+        <svg id="nwLogChart" viewBox="0 0 920 220" role="img" aria-labelledby="nwLogChartTitle">
+          <title id="nwLogChartTitle">Actual monthly savings chart</title>
+        </svg>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h3>Logged months</h3>
+        <span class="sub" id="nwLogTableSub"></span>
+      </div>
+      <div class="card-body" style="padding:4px 6px 6px">
+        <div class="table-scroll">
+          <table class="summary" id="nwLogTable"></table>
+        </div>
+      </div>
+    </div>
+
     <footer class="legal">
       <strong style="color:var(--text-secondary)">Cash flow &amp; net worth</strong> is your own money, kept
       separate from the equity model — figures here are <strong>actual dollars</strong>, not millions.
@@ -1157,6 +1230,11 @@ footer.legal code {
       changes when money lands, never the annual return itself. Income and expenses are held flat across the horizon;
       <em>Savings only</em> is the same money with the return set to zero, so the gap between the two lines is the
       compounding. This is a projection, not advice or a guarantee — real returns vary year to year.
+      <br><br>
+      <strong style="color:var(--text-secondary)">Monthly actuals</strong> is a separate log of what really
+      happened, one entry per calendar month — it never overwrites the plan above it. Saving a month you've
+      already logged replaces that entry, so correcting an old month works the same as adding a new one.
+      Insights (average saved, streak, best month, vs. plan) are computed only from months you've logged.
     </footer>
   </div>
 </div>
@@ -1437,7 +1515,7 @@ let savedSnapshot = null;   // stateJSON() at last load/save, for the dirty chec
 function persist() {
   try {
     localStorage.setItem(STORE_KEY, JSON.stringify({
-      company, assumptions, locked, dataSource, netWorth: nw, savedAt: Date.now(),
+      company, assumptions, locked, dataSource, netWorth: nw, netWorthLog: nwLog, savedAt: Date.now(),
     }));
   } catch { /* private mode / quota — non-fatal */ }
   updateDirtyUI();
@@ -1461,6 +1539,7 @@ function restore() {
       }
     }
     if (s.netWorth && typeof s.netWorth === "object") nw = normalizeNW(s.netWorth);
+    if (Array.isArray(s.netWorthLog)) nwLog = normalizeNWLog(s.netWorthLog);
     dataSource = s.dataSource === "sample" ? "sample" : (s.dataSource || "manual");
     return true;
   } catch { return false; }
@@ -1486,7 +1565,7 @@ function cloneAssumptions() {
   return JSON.parse(JSON.stringify(assumptions));
 }
 function stateJSON() {
-  return JSON.stringify({ company, assumptions, locked, netWorth: nw });
+  return JSON.stringify({ company, assumptions, locked, netWorth: nw, netWorthLog: nwLog });
 }
 function markClean() { savedSnapshot = stateJSON(); updateDirtyUI(); }
 function isDirty() { return currentProjectId !== null && stateJSON() !== savedSnapshot; }
@@ -1570,7 +1649,7 @@ function saveAsNew(name) {
   map[id] = {
     id, name: name.trim() || "Untitled", ticker: company.ticker,
     company: { ...company }, assumptions: cloneAssumptions(), locked,
-    netWorth: { ...nw },
+    netWorth: { ...nw }, netWorthLog: nwLog.map(e => ({ ...e })),
     createdAt: now, updatedAt: now,
   };
   saveProjectsMap(map);
@@ -1588,7 +1667,7 @@ function saveOverActive() {
   map[currentProjectId] = {
     ...existing, ticker: company.ticker,
     company: { ...company }, assumptions: cloneAssumptions(), locked,
-    netWorth: { ...nw },
+    netWorth: { ...nw }, netWorthLog: nwLog.map(e => ({ ...e })),
     updatedAt: Date.now(),
   };
   saveProjectsMap(map);
@@ -1604,6 +1683,7 @@ function loadProjectById(id) {
   company = { ...company, ...p.company };
   locked = !!p.locked;
   nw = p.netWorth ? normalizeNW(p.netWorth) : { ...NW_DEFAULTS };
+  nwLog = Array.isArray(p.netWorthLog) ? normalizeNWLog(p.netWorthLog) : [];
   if (p.assumptions) {
     for (const k of ["base", "bear", "bull"]) {
       if (!p.assumptions[k]) continue;
@@ -1620,6 +1700,7 @@ function loadProjectById(id) {
   applyLockUI();
   markSource(dataSource);
   renderAll();
+  clearLogForm();
   persist();
   return true;
 }
@@ -1630,6 +1711,7 @@ function loadProjectById(id) {
 function hasWorkWorthKeeping() {
   if (currentProjectId) return isDirty();
   if (nw.start || nw.income || nw.expenses) return true;
+  if (nwLog.length) return true;
   if (dataSource === "sample") return false;
   return !!(company.revenue || company.netIncome || company.eps || company.shares);
 }
@@ -1648,6 +1730,7 @@ function startNewProject() {
   assumptions.bull = mkAssumptions(0.18, 20, 28);
   locked = false;
   nw = { ...NW_DEFAULTS };
+  nwLog = [];
   dataSource = "manual";
   setActiveProject(null);
   document.getElementById("ticker").value = "";
@@ -1655,6 +1738,7 @@ function startNewProject() {
   applyLockUI();
   markSource(dataSource);
   renderAll();
+  clearLogForm();
   markClean();
   persist();
   flashToast("New blank projection — enter Company Inputs to begin.");
@@ -2380,6 +2464,76 @@ function computeNetWorth() {
 }
 function recomputeNW() { nwResults = computeNetWorth(); }
 
+/* ══ Monthly actuals log ══════════════════════════════════════════════════
+   A separate, independent record of what actually happened — keyed by
+   calendar month ("YYYY-MM"), one entry per month. It never feeds back into
+   the plan above (nw.income/nw.expenses); it's compared against it. */
+let nwLog = [];   // [{ month: "2026-08", income, expenses, netWorth: number|null }]
+
+function normalizeNWLog(raw) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  for (const e of raw) {
+    if (!e || typeof e !== "object" || !/^\d{4}-\d{2}$/.test(e.month)) continue;
+    const income = Number(e.income), expenses = Number(e.expenses), netWorth = Number(e.netWorth);
+    out.push({
+      month: e.month,
+      income: isFinite(income) ? income : 0,
+      expenses: isFinite(expenses) ? expenses : 0,
+      netWorth: e.netWorth === null || e.netWorth === undefined || !isFinite(netWorth) ? null : netWorth,
+    });
+  }
+  out.sort((a, b) => a.month < b.month ? -1 : a.month > b.month ? 1 : 0);
+  return out;
+}
+function upsertLogEntry(entry) {
+  const i = nwLog.findIndex(e => e.month === entry.month);
+  if (i >= 0) nwLog[i] = entry; else nwLog.push(entry);
+  nwLog.sort((a, b) => a.month < b.month ? -1 : a.month > b.month ? 1 : 0);
+}
+function currentMonthKey() {
+  const d = new Date();
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+}
+const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function monthLabel(m) {
+  const [y, mo] = m.split("-").map(Number);
+  return `${MONTH_NAMES[mo - 1]} ${y}`;
+}
+function monthLabelShort(m) {
+  const [y, mo] = m.split("-").map(Number);
+  return `${MONTH_NAMES[mo - 1]} '${String(y).slice(2)}`;
+}
+
+/* Averages, streaks and best/worst are computed only from logged months —
+   the plan (nw.income/nw.expenses) is normalised to a monthly figure so it's
+   comparable regardless of which pay period is selected up above. */
+function computeLogInsights() {
+  const n = nwLog.length;
+  if (!n) return null;
+  let sumIncome = 0, sumExpenses = 0, posMonths = 0;
+  let best = nwLog[0], worst = nwLog[0], bestSaved = -Infinity, worstSaved = Infinity;
+  for (const e of nwLog) {
+    const saved = e.income - e.expenses;
+    sumIncome += e.income; sumExpenses += e.expenses;
+    if (saved > 0) posMonths++;
+    if (saved > bestSaved) { bestSaved = saved; best = e; }
+    if (saved < worstSaved) { worstSaved = saved; worst = e; }
+  }
+  let streak = 0;
+  for (let i = n - 1; i >= 0; i--) {
+    if (nwLog[i].income - nwLog[i].expenses > 0) streak++; else break;
+  }
+  const avgIncome = sumIncome / n, avgExpenses = sumExpenses / n, avgSaved = avgIncome - avgExpenses;
+  const avgRate = avgIncome > 0 ? avgSaved / avgIncome : 0;
+  const plannedMonthly = (nw.income - nw.expenses) * nwMeta().perYear / 12;
+  return {
+    n, avgIncome, avgExpenses, avgSaved, avgRate, posMonths, streak,
+    best, bestSaved, worst, worstSaved,
+    plannedMonthly, vsPlan: avgSaved - plannedMonthly,
+  };
+}
+
 const fmtMoney = (v) => !isFinite(v) ? EMDASH
   : (v < 0 ? "\u2212" : "") + "$" + Math.abs(Math.round(v)).toLocaleString("en-US");
 const fmtMoneyShort = (v) => {
@@ -2701,11 +2855,208 @@ function renderNWTable() {
     </tbody>`;
 }
 
+/* ── Monthly actuals: insights, chart, table ──────────────────────────────── */
+function renderNWLogInsights() {
+  const grid = document.getElementById("nwLogInsights");
+  if (!grid) return;
+  const ins = computeLogInsights();
+  if (!ins) {
+    grid.innerHTML = `
+      <div class="kpi nw derived" style="grid-column:1/-1">
+        <div class="kpi-label">Insights</div>
+        <div class="kpi-value is-empty">${EMDASH}</div>
+        <div class="kpi-foot">Log your first month below to see trends here</div>
+      </div>`;
+    return;
+  }
+  const vsCls = ins.vsPlan > 0.5 ? "pos" : ins.vsPlan < -0.5 ? "neg" : "";
+  const cards = [
+    {
+      label: `Avg saved / mo · ${ins.n} logged`,
+      value: fmtMoney(ins.avgSaved),
+      foot: ins.avgIncome > 0 ? `${(ins.avgRate * 100).toFixed(0)}% of income kept` : "Add income to see a rate",
+      cls: ins.avgSaved >= 0 ? "" : "neg",
+    },
+    {
+      label: "Vs. your plan",
+      value: (ins.vsPlan > 0 ? "+" : "") + fmtMoney(ins.vsPlan),
+      foot: nw.income || nw.expenses
+        ? (ins.vsPlan >= 0 ? "ahead of plan, on average" : "behind plan, on average")
+        : "Set a plan above to compare",
+      cls: vsCls,
+    },
+    {
+      label: "Current streak",
+      value: `${ins.streak} ${ins.streak === 1 ? "month" : "months"}`,
+      foot: `${ins.posMonths} of ${ins.n} logged ${ins.posMonths === 1 ? "month" : "months"} positive`,
+    },
+    {
+      label: "Best month",
+      value: monthLabel(ins.best.month),
+      foot: `${fmtMoney(ins.bestSaved)} saved`,
+      cls: ins.bestSaved >= 0 ? "" : "neg",
+    },
+  ];
+  grid.innerHTML = cards.map(c => `
+    <div class="kpi nw derived">
+      <div class="kpi-label">${c.label}</div>
+      <div class="kpi-value">${c.value}</div>
+      <div class="kpi-foot ${c.cls || ""}">${c.foot}</div>
+    </div>`).join("");
+}
+
+const NWLOG_VB = { w: 920, h: 220 };
+const NWLOG_PAD = { t: 20, r: 20, b: 32, l: 60 };
+
+function renderNWLogChart() {
+  const card = document.getElementById("nwLogChartCard");
+  const svg = document.getElementById("nwLogChart");
+  const sub = document.getElementById("nwLogChartSub");
+  if (!card || !svg) return;
+  if (!nwLog.length) { card.hidden = true; return; }
+  card.hidden = false;
+  [...svg.childNodes].forEach(n => { if (n.nodeName !== "title") n.remove(); });
+
+  const entries = nwLog.slice(-12);
+  if (sub) sub.textContent = nwLog.length > 12 ? "Last 12 logged months" : `${entries.length} logged ${entries.length === 1 ? "month" : "months"}`;
+
+  const vals = entries.map(e => e.income - e.expenses);
+  const plotW = NWLOG_VB.w - NWLOG_PAD.l - NWLOG_PAD.r;
+  const plotH = NWLOG_VB.h - NWLOG_PAD.t - NWLOG_PAD.b;
+  const ticks = niceTicks(Math.min(0, ...vals), Math.max(0, ...vals), 4);
+  const yMin = ticks[0], yMax = ticks[ticks.length - 1];
+  const Y = (v) => NWLOG_PAD.t + plotH - ((v - yMin) / (yMax - yMin || 1)) * plotH;
+  const zeroY = Y(0);
+
+  const gGrid = el("g");
+  for (const tv of ticks) {
+    const y = Y(tv);
+    gGrid.appendChild(el("line", { x1: NWLOG_PAD.l, x2: NWLOG_PAD.l + plotW, y1: y, y2: y,
+      stroke: tv === 0 ? "#383835" : "#232320", "stroke-width": "1" }));
+    const lab = el("text", { x: NWLOG_PAD.l - 10, y: y + 4, "text-anchor": "end",
+      fill: "#78776f", "font-size": "11", "font-variant-numeric": "tabular-nums" });
+    lab.textContent = fmtMoneyShort(tv);
+    gGrid.appendChild(lab);
+  }
+  svg.appendChild(gGrid);
+
+  const bw = plotW / entries.length;
+  entries.forEach((e, i) => {
+    const v = vals[i];
+    const x = NWLOG_PAD.l + i * bw + bw * 0.18;
+    const w = bw * 0.64;
+    const top = Math.min(Y(v), zeroY);
+    const h = Math.max(Math.abs(Y(v) - zeroY), 1.5);
+    const bar = el("rect", { x, y: top, width: w, height: h, rx: "2.5",
+      fill: v >= 0 ? "#06b07a" : "#d43232" });
+    const t = el("title");
+    t.textContent = `${monthLabel(e.month)}: ${fmtMoney(v)} saved`;
+    bar.appendChild(t);
+    svg.appendChild(bar);
+
+    const lab = el("text", { x: x + w / 2, y: NWLOG_VB.h - NWLOG_PAD.b + 16, "text-anchor": "middle",
+      fill: "#78776f", "font-size": "10.5" });
+    lab.textContent = monthLabelShort(e.month);
+    svg.appendChild(lab);
+  });
+}
+
+function renderNWLogTable() {
+  const t = document.getElementById("nwLogTable");
+  const sub = document.getElementById("nwLogTableSub");
+  if (!t) return;
+  if (!nwLog.length) {
+    t.innerHTML = `<tbody><tr><td style="text-align:left;color:var(--text-muted);padding:14px 6px">
+      No months logged yet — use the form above.</td></tr></tbody>`;
+    if (sub) sub.textContent = "";
+    return;
+  }
+  if (sub) sub.textContent = `${nwLog.length} ${nwLog.length === 1 ? "month" : "months"}`;
+  const rows = [...nwLog].reverse().map(e => {
+    const saved = e.income - e.expenses;
+    return `<tr>
+      <th>${monthLabel(e.month)}</th>
+      <td>${fmtMoney(e.income)}</td>
+      <td>${fmtMoney(e.expenses)}</td>
+      <td class="${saved < 0 ? "nw-neg" : "nw-total"}">${fmtMoney(saved)}</td>
+      <td>${e.netWorth === null ? EMDASH : fmtMoney(e.netWorth)}</td>
+      <td class="nwlog-actions">
+        <button type="button" class="fill-btn" data-log-edit="${e.month}" title="Edit ${monthLabel(e.month)}" aria-label="Edit ${monthLabel(e.month)}">Edit</button>
+        <button type="button" class="fill-btn" data-log-del="${e.month}" title="Remove ${monthLabel(e.month)}" aria-label="Remove ${monthLabel(e.month)}">✕</button>
+      </td>
+    </tr>`;
+  }).join("");
+  t.innerHTML = `
+    <thead><tr>
+      <th>Month</th><th>Income</th><th>Expenses</th><th>Saved</th><th>Net worth</th><th></th>
+    </tr></thead>
+    <tbody>${rows}</tbody>`;
+  t.querySelectorAll("[data-log-edit]").forEach(b =>
+    b.addEventListener("click", () => loadLogEntryToForm(b.dataset.logEdit)));
+  t.querySelectorAll("[data-log-del]").forEach(b =>
+    b.addEventListener("click", () => onNWLogDelete(b.dataset.logDel)));
+}
+
+function renderNWLog() {
+  renderNWLogInsights();
+  renderNWLogChart();
+  renderNWLogTable();
+}
+
+function loadLogEntryToForm(month) {
+  const e = nwLog.find(x => x.month === month);
+  if (!e) return;
+  document.getElementById("nwLogMonth").value = e.month;
+  document.getElementById("nwLogIncome").value = e.income || "";
+  document.getElementById("nwLogExpenses").value = e.expenses || "";
+  document.getElementById("nwLogNetWorth").value = e.netWorth === null ? "" : e.netWorth;
+  document.getElementById("nwLogForm").scrollIntoView({ behavior: "smooth", block: "center" });
+  document.getElementById("nwLogIncome").focus();
+}
+
+function clearLogForm() {
+  document.getElementById("nwLogMonth").value = currentMonthKey();
+  document.getElementById("nwLogIncome").value = "";
+  document.getElementById("nwLogExpenses").value = "";
+  document.getElementById("nwLogNetWorth").value = "";
+}
+
+function onNWLogSave() {
+  const monthInp = document.getElementById("nwLogMonth");
+  if (!/^\d{4}-\d{2}$/.test(monthInp.value)) {
+    flashToast("Pick a month first.", true);
+    return;
+  }
+  const incomeInp = document.getElementById("nwLogIncome");
+  const expensesInp = document.getElementById("nwLogExpenses");
+  const nwInp = document.getElementById("nwLogNetWorth");
+  const income = parseFloat(sanitizeNumericInput(incomeInp)) || 0;
+  const expenses = parseFloat(sanitizeNumericInput(expensesInp)) || 0;
+  sanitizeNumericInput(nwInp);
+  const nwRaw = nwInp.value.trim();
+  const netWorth = nwRaw === "" ? null : (parseFloat(nwRaw) || 0);
+  const month = monthInp.value;
+
+  upsertLogEntry({ month, income, expenses, netWorth });
+  persist();
+  renderNWLog();
+  flashToast(`${monthLabel(month)} logged.`);
+}
+
+function onNWLogDelete(month) {
+  if (!confirm(`Remove the ${monthLabel(month)} entry?`)) return;
+  nwLog = nwLog.filter(e => e.month !== month);
+  persist();
+  renderNWLog();
+  flashToast("Entry removed.");
+}
+
 function renderNW() {
   renderNWCards();
   renderNWChart();
   renderNWTable();
   updateNWDerived();
+  renderNWLog();
 }
 
 function applyPeriodUI() {
@@ -2764,6 +3115,11 @@ document.getElementById("btnNwReset").addEventListener("click", () => {
   hideNWTooltip();
   renderNW();
   flashToast("Cash flow cleared.");
+});
+document.getElementById("btnNwLogSave").addEventListener("click", onNWLogSave);
+document.getElementById("btnNwLogClear").addEventListener("click", clearLogForm);
+["nwLogIncome", "nwLogExpenses", "nwLogNetWorth"].forEach(id => {
+  document.getElementById(id).addEventListener("input", (ev) => sanitizeNumericInput(ev.target));
 });
 document.getElementById("btnRefresh").addEventListener("click", doRefresh);
 document.getElementById("btnLock").addEventListener("click", toggleLock);
@@ -3232,6 +3588,7 @@ document.getElementById("btnCalcReset").addEventListener("click", () => {
 
 restoreCalc();
 writeCalcInputs();
+document.getElementById("nwLogMonth").value = currentMonthKey();
 
 /* Boot: an explicitly opened named projection wins if one is set; otherwise
    fall back to the scratch autosave; otherwise sample figures (clearly
