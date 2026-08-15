@@ -622,6 +622,7 @@ td.cellinput { padding: 4px 6px; }
 }
 .fill-btn:active { transform: scale(.92); }
 .fill-btn:focus-visible { outline: 2px solid var(--gold-dim); outline-offset: 1px; }
+.fill-btn.wide { width: auto; padding: 0 8px; margin-left: 0; }
 @media (hover: hover) and (pointer: fine) {
   .fill-btn:hover { color: var(--text-primary); border-color: rgba(255,255,255,.28); background: var(--surface-3); }
 }
@@ -828,6 +829,10 @@ footer.legal code {
   .modal-close { width: 40px; height: 40px; }
   .input, .btn, .btn-primary, .btn-ghost, .lock-btn { min-height: 44px; }
   .cell-edit { min-height: 38px; }
+  .fill-btn { min-width: 27px; min-height: 27px; }
+  .fill-btn.wide { min-height: 30px; padding: 0 10px; }
+  .brand { min-height: 44px; }
+  .seg button { min-height: 34px; }
 }
 </style>
 </head>
@@ -2981,7 +2986,7 @@ function renderNWLogTable() {
       <td class="${saved < 0 ? "nw-neg" : "nw-total"}">${fmtMoney(saved)}</td>
       <td>${e.netWorth === null ? EMDASH : fmtMoney(e.netWorth)}</td>
       <td class="nwlog-actions">
-        <button type="button" class="fill-btn" data-log-edit="${e.month}" title="Edit ${monthLabel(e.month)}" aria-label="Edit ${monthLabel(e.month)}">Edit</button>
+        <button type="button" class="fill-btn wide" data-log-edit="${e.month}" title="Edit ${monthLabel(e.month)}" aria-label="Edit ${monthLabel(e.month)}">Edit</button>
         <button type="button" class="fill-btn" data-log-del="${e.month}" title="Remove ${monthLabel(e.month)}" aria-label="Remove ${monthLabel(e.month)}">✕</button>
       </td>
     </tr>`;
@@ -3003,9 +3008,16 @@ function renderNWLog() {
   renderNWLogTable();
 }
 
+/* Which logged month (if any) the form currently represents. Lets Save tell
+   "editing this entry, and I changed its month" apart from "logging a new
+   month" — without it, changing the month while editing left the old entry
+   behind instead of moving it, so the same real month ended up logged twice. */
+let nwLogEditingMonth = null;
+
 function loadLogEntryToForm(month) {
   const e = nwLog.find(x => x.month === month);
   if (!e) return;
+  nwLogEditingMonth = month;
   document.getElementById("nwLogMonth").value = e.month;
   document.getElementById("nwLogIncome").value = e.income || "";
   document.getElementById("nwLogExpenses").value = e.expenses || "";
@@ -3015,6 +3027,7 @@ function loadLogEntryToForm(month) {
 }
 
 function clearLogForm() {
+  nwLogEditingMonth = null;
   document.getElementById("nwLogMonth").value = currentMonthKey();
   document.getElementById("nwLogIncome").value = "";
   document.getElementById("nwLogExpenses").value = "";
@@ -3037,7 +3050,11 @@ function onNWLogSave() {
   const netWorth = nwRaw === "" ? null : (parseFloat(nwRaw) || 0);
   const month = monthInp.value;
 
+  if (nwLogEditingMonth && nwLogEditingMonth !== month) {
+    nwLog = nwLog.filter(e => e.month !== nwLogEditingMonth);
+  }
   upsertLogEntry({ month, income, expenses, netWorth });
+  nwLogEditingMonth = null;
   persist();
   renderNWLog();
   flashToast(`${monthLabel(month)} logged.`);
@@ -3046,6 +3063,7 @@ function onNWLogSave() {
 function onNWLogDelete(month) {
   if (!confirm(`Remove the ${monthLabel(month)} entry?`)) return;
   nwLog = nwLog.filter(e => e.month !== month);
+  if (nwLogEditingMonth === month) nwLogEditingMonth = null;
   persist();
   renderNWLog();
   flashToast("Entry removed.");
@@ -3377,7 +3395,11 @@ function calcResults() {
   const years = Math.max(0, Math.min(100, Math.floor(Number(calc.years) || 0)));
   const base = Number(calc.rate) || 0;
   const v = Math.abs(Number(calc.variance) || 0);
-  const rates = { low: base - v, base, high: base + v };
+  // Clamped the same way compoundSeries() clamps internally, so a rate below
+  // -100% never shows a label (e.g. "-155.0%") that doesn't match the number
+  // actually used to compute the card below it.
+  const clampRate = (r) => Math.max(-99.9999, r);
+  const rates = { low: clampRate(base - v), base: clampRate(base), high: clampRate(base + v) };
   const series = {};
   for (const s of CALC_SERIES) series[s.key] = compoundSeries(P, PMT, years, rates[s.key]);
   return { series, rates, years, contributions: P + PMT * 12 * years };
@@ -3412,6 +3434,11 @@ function renderCalcChart(res) {
       fill: "#78776f", "font-size": "14", "font-family": "inherit", "font-weight": "600" });
     t.textContent = "Enter a length of time to plot the projection";
     svg.append(t);
+    // Otherwise these keep showing the previous run's numbers — a projection
+    // that no longer exists — instead of going quiet along with the chart.
+    document.getElementById("calcLegend").innerHTML =
+      `<span class="legend-item" style="color:var(--text-muted)">· awaiting a length of time</span>`;
+    document.getElementById("calcChartSub").textContent = "";
     return;
   }
 
@@ -3517,9 +3544,12 @@ function onCalcInput(ev) {
 /* ── Product switcher ───────────────────────────────────────────────────── */
 const VIEW_KEY = "projectionModel.view.v1";
 const VIEWS = {
-  projection: { mark: "FP", title: "Projection Model",    sub: "Scenario terminal · 2026–2030" },
-  calculator: { mark: "CI", title: "Compound Calculator", sub: "Growth with regular contributions" },
-  networth:   { mark: "NW", title: "Net Worth Tracker",   sub: "Your own cash flow and net worth path" },
+  projection: { mark: "FP", title: "Projection Model",    sub: "Scenario terminal · 2026–2030",
+    swatch: "linear-gradient(145deg,var(--gold),#8f7526)", fg: "#221c05" },
+  calculator: { mark: "CI", title: "Compound Calculator", sub: "Growth with regular contributions",
+    swatch: "linear-gradient(145deg,#e9c766,#7d6520)", fg: "#221c05" },
+  networth:   { mark: "NW", title: "Net Worth Tracker",   sub: "Your own cash flow and net worth path",
+    swatch: "linear-gradient(145deg,#4fcf9f,#0d6b4c)", fg: "#04140e" },
 };
 let currentView = "projection";
 
@@ -3533,7 +3563,10 @@ function setView(v) {
     node.hidden = node.dataset.viewOnly !== v;
   });
   const meta = VIEWS[v];
-  document.getElementById("brandMark").textContent = meta.mark;
+  const mark = document.getElementById("brandMark");
+  mark.textContent = meta.mark;
+  mark.style.background = meta.swatch;
+  mark.style.color = meta.fg;
   document.getElementById("productTitle").textContent = meta.title;
   document.getElementById("productSub").textContent = meta.sub;
   document.querySelectorAll(".product-item").forEach(b => {
