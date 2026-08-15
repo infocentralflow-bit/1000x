@@ -503,6 +503,22 @@ th.year0 .hdr-lock { margin-left: 5px; opacity: .8; vertical-align: -1px; }
 /* scenario accent bar */
 .scenario-card { margin-bottom: 16px; }
 .scenario-card .card-head { border-left: 3px solid var(--accent); }
+/* Foldable — <details>/<summary> gives real disclosure semantics (keyboard,
+   screen readers) for free; we only need to strip the native marker and
+   drive our own chevron off the [open] attribute. */
+.scenario-card > summary.card-head {
+  cursor: pointer; list-style: none;
+  transition: background .15s var(--ease);
+}
+.scenario-card > summary.card-head::-webkit-details-marker { display: none; }
+.scenario-card > summary.card-head::marker { content: ""; }
+@media (hover: hover) and (pointer: fine) {
+  .scenario-card > summary.card-head:hover { background: rgba(255,255,255,.025); }
+}
+.scenario-card > summary.card-head:focus-visible { outline: 2px solid var(--gold-dim); outline-offset: -2px; }
+.scenario-card:not([open]) .card-head { border-bottom-color: transparent; }
+.fold-caret { flex: none; color: var(--text-muted); transition: transform .2s var(--ease); }
+.scenario-card[open] .fold-caret { transform: rotate(180deg); }
 .scenario-chip {
   display: inline-flex; align-items: center; gap: 8px;
   font-size: 13px; font-weight: 700; letter-spacing: .04em;
@@ -1015,6 +1031,7 @@ footer.legal code {
     <h2>Scenario Detail</h2>
     <span class="hint">Dashed cells are editable assumptions — every gold value recalculates live</span>
     <span class="rule"></span>
+    <button id="btnFoldAll" class="lock-btn" title="Expand or collapse all three scenario tables">Collapse all</button>
   </div>
   <div id="scenarios"></div>
 
@@ -1329,6 +1346,30 @@ let dataSource = "sample";   // sample | workbook | manual | api
 let bridgeUp = false;
 let metric = "revenue";
 let hoverIdx = null;
+
+/* Which scenario tables are expanded — a device-level UI preference (not
+   project data), so it survives reloads but isn't tied to any one saved
+   projection. Base starts open since it's usually what you're driving;
+   Bear/Bull start folded to keep the page short until you need them. */
+const SCENARIO_OPEN_KEY = "projectionModel.scenarioOpen.v1";
+let scenarioOpen = { base: true, bear: false, bull: false };
+function loadScenarioOpen() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(SCENARIO_OPEN_KEY) || "null");
+    if (raw && typeof raw === "object") {
+      for (const k of ["base", "bear", "bull"]) if (typeof raw[k] === "boolean") scenarioOpen[k] = raw[k];
+    }
+  } catch { /* keep defaults */ }
+}
+function saveScenarioOpen() {
+  try { localStorage.setItem(SCENARIO_OPEN_KEY, JSON.stringify(scenarioOpen)); } catch { /* quota */ }
+}
+function updateFoldAllLabel() {
+  const btn = document.getElementById("btnFoldAll");
+  if (!btn) return;
+  btn.textContent = (scenarioOpen.base || scenarioOpen.bear || scenarioOpen.bull) ? "Collapse all" : "Expand all";
+}
+loadScenarioOpen();
 
 const safeDiv = (a, b) => (b === 0 || !isFinite(b) ? 0 : a / b);
 
@@ -2133,14 +2174,17 @@ function renderScenarios() {
       </tr>`;
 
     return `
-    <div class="card scenario-card" style="--accent:${s.color}">
-      <div class="card-head">
+    <details class="card scenario-card" style="--accent:${s.color}" data-sc="${k}"${scenarioOpen[k] ? " open" : ""}>
+      <summary class="card-head">
         <span class="scenario-chip"><span class="swatch"></span>${s.label.toUpperCase()}</span>
         <span class="sub" id="sub-${k}">
           CAGR ${fmtPct(r.cagrLow)} – ${fmtPct(r.cagrHigh)} ·
           2030 price ${fmt$(r.priceLow[NY - 1])} – ${fmt$(r.priceHigh[NY - 1])}
         </span>
-      </div>
+        <svg class="fold-caret" width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M4 6.5 8 10.5l4-4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </summary>
       <div class="card-body" style="padding:6px 6px 10px">
         <div class="table-scroll">
           <table class="model">
@@ -2163,8 +2207,17 @@ function renderScenarios() {
           </table>
         </div>
       </div>
-    </div>`;
+    </details>`;
   }).join("");
+
+  host.querySelectorAll(".scenario-card").forEach(det => {
+    det.addEventListener("toggle", () => {
+      scenarioOpen[det.dataset.sc] = det.open;
+      saveScenarioOpen();
+      updateFoldAllLabel();
+    });
+  });
+  updateFoldAllLabel();
 
   host.querySelectorAll(".cell-edit").forEach(inp => {
     inp.addEventListener("input", onCellEdit);
@@ -3103,6 +3156,13 @@ document.getElementById("metricSeg").addEventListener("click", (ev) => {
     x.setAttribute("aria-pressed", String(x === b)));
   hideTooltip();
   renderChart();
+});
+document.getElementById("btnFoldAll").addEventListener("click", () => {
+  const next = !(scenarioOpen.base || scenarioOpen.bear || scenarioOpen.bull);
+  scenarioOpen.base = scenarioOpen.bear = scenarioOpen.bull = next;
+  saveScenarioOpen();
+  document.querySelectorAll("#scenarios .scenario-card").forEach(det => { det.open = next; });
+  updateFoldAllLabel();
 });
 document.getElementById("periodSeg").addEventListener("click", (ev) => {
   const b = ev.target.closest("button[data-period]");
