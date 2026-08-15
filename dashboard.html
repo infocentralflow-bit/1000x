@@ -857,6 +857,16 @@ footer.legal code {
             <path d="M3 8.5 6.5 12 13 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
         </button>
+        <button class="product-item" role="menuitem" data-view="networth">
+          <span class="pm-mark" style="background:linear-gradient(145deg,#4fcf9f,#0d6b4c);color:#04140e">NW</span>
+          <span>
+            <span class="pm-name">Net Worth Tracker</span>
+            <span class="pm-sub">Your own cash flow and net worth path</span>
+          </span>
+          <svg class="pm-check" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M3 8.5 6.5 12 13 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
       </div>
     </div>
 
@@ -992,59 +1002,6 @@ footer.legal code {
   </div>
   <div id="scenarios"></div>
 
-  <!-- ── Cash flow & net worth ───────────────────────────────────────── -->
-  <div class="section-head">
-    <h2>Cash Flow &amp; Net Worth</h2>
-    <span class="hint">Your own money — set what you take in and what you keep, the rest is calculated</span>
-    <span class="rule"></span>
-    <div class="seg" id="periodSeg" role="group" aria-label="Pay period">
-      <button data-period="biweekly" aria-pressed="false">Every 2 weeks</button>
-      <button data-period="semimonthly" aria-pressed="false">Twice a month</button>
-      <button data-period="monthly" aria-pressed="true">Monthly</button>
-    </div>
-    <button id="btnNwReset" class="lock-btn" title="Clear the cash flow figures">Clear</button>
-  </div>
-  <div class="kpi-grid" id="nwGrid"></div>
-
-  <div class="controls">
-    <div class="section-head" style="margin:0">
-      <h2>Net worth path</h2>
-    </div>
-    <div class="seg" id="horizonSeg" role="group" aria-label="Projection horizon">
-      <button data-yrs="1"  aria-pressed="false">1 yr</button>
-      <button data-yrs="5"  aria-pressed="true">5 yr</button>
-      <button data-yrs="10" aria-pressed="false">10 yr</button>
-      <button data-yrs="20" aria-pressed="false">20 yr</button>
-      <button data-yrs="30" aria-pressed="false">30 yr</button>
-    </div>
-    <span class="hint" style="color:var(--text-muted);font-size:11.5px">
-      Hover or focus the chart and use ← → to read values
-    </span>
-  </div>
-
-  <div class="card">
-    <div class="chart-wrap">
-      <svg id="nwChart" viewBox="0 0 920 300" role="img" aria-labelledby="nwChartTitle nwChartDesc" tabindex="0">
-        <title id="nwChartTitle">Net worth projection chart</title>
-        <desc id="nwChartDesc">Projected net worth over the selected horizon, against the same savings with no investment return. Full values are in the table below.</desc>
-      </svg>
-      <div id="nwTooltip" class="tooltip" role="status" aria-live="polite"></div>
-    </div>
-    <div class="chart-legend" id="nwLegend"></div>
-  </div>
-
-  <div class="card">
-    <div class="card-head">
-      <h3>Year by year</h3>
-      <span class="sub" id="nwSub"></span>
-    </div>
-    <div class="card-body" style="padding:4px 6px 6px">
-      <div class="table-scroll">
-        <table class="summary" id="nwTable"></table>
-      </div>
-    </div>
-  </div>
-
   <footer class="legal">
     <strong style="color:var(--text-secondary)">Formula parity with the workbook.</strong>
     Revenue<sub>t</sub> = Revenue<sub>t−1</sub> × (1 + growth<sub>t</sub>) ·
@@ -1059,14 +1016,6 @@ footer.legal code {
     The workbook leaves 2028–2030 growth and P/E blank as <em>ENTER VALUES</em> placeholders; this app carries the
     prior year's assumption forward so the projection is never dead, and every carried cell is editable above.
     Share counts are held flat across all five years, as in the workbook.
-    <br><br>
-    <strong style="color:var(--text-secondary)">Cash flow &amp; net worth</strong> is your own money and is
-    separate from the equity model — figures there are <strong>actual dollars</strong>, not millions.
-    Net&nbsp;Worth<sub>p</sub> = Net&nbsp;Worth<sub>p−1</sub> × (1 + r) + (income − expenses), applied once per pay period,
-    where r = (1 + annual&nbsp;return)<sup>1/periods per year</sup> − 1 — so switching between monthly and bi-weekly
-    changes when money lands, never the annual return itself. Income and expenses are held flat across the horizon;
-    <em>Savings only</em> is the same money with the return set to zero, so the gap between the two lines is the
-    compounding. This is a projection, not advice or a guarantee — real returns vary year to year.
   </footer>
 
   </div><!-- /#viewProjection -->
@@ -1143,6 +1092,71 @@ footer.legal code {
       The low and high projections apply the variance range to your base rate — a 15% base with a 5% range
       projects 10% and 20%. Figures are nominal, before inflation, fees and tax, and assume the rate holds
       steady for the whole period. Not investment advice.
+    </footer>
+  </div>
+
+  <!-- ── Net worth tracker ──────────────────────────────────────────────── -->
+  <div id="viewNetWorth" hidden>
+    <div class="section-head">
+      <h2>Cash Flow &amp; Net Worth</h2>
+      <span class="hint">Your own money — set what you take in and what you keep, the rest is calculated</span>
+      <span class="rule"></span>
+      <div class="seg" id="periodSeg" role="group" aria-label="Pay period">
+        <button data-period="biweekly" aria-pressed="false">Every 2 weeks</button>
+        <button data-period="semimonthly" aria-pressed="false">Twice a month</button>
+        <button data-period="monthly" aria-pressed="true">Monthly</button>
+      </div>
+      <button id="btnNwReset" class="lock-btn" title="Clear the cash flow figures">Clear</button>
+    </div>
+    <div class="kpi-grid" id="nwGrid"></div>
+
+    <div class="controls">
+      <div class="section-head" style="margin:0">
+        <h2>Net worth path</h2>
+      </div>
+      <div class="seg" id="horizonSeg" role="group" aria-label="Projection horizon">
+        <button data-yrs="1"  aria-pressed="false">1 yr</button>
+        <button data-yrs="5"  aria-pressed="true">5 yr</button>
+        <button data-yrs="10" aria-pressed="false">10 yr</button>
+        <button data-yrs="20" aria-pressed="false">20 yr</button>
+        <button data-yrs="30" aria-pressed="false">30 yr</button>
+      </div>
+      <span class="hint" style="color:var(--text-muted);font-size:11.5px">
+        Hover or focus the chart and use ← → to read values
+      </span>
+    </div>
+
+    <div class="card">
+      <div class="chart-wrap">
+        <svg id="nwChart" viewBox="0 0 920 300" role="img" aria-labelledby="nwChartTitle nwChartDesc" tabindex="0">
+          <title id="nwChartTitle">Net worth projection chart</title>
+          <desc id="nwChartDesc">Projected net worth over the selected horizon, against the same savings with no investment return. Full values are in the table below.</desc>
+        </svg>
+        <div id="nwTooltip" class="tooltip" role="status" aria-live="polite"></div>
+      </div>
+      <div class="chart-legend" id="nwLegend"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h3>Year by year</h3>
+        <span class="sub" id="nwSub"></span>
+      </div>
+      <div class="card-body" style="padding:4px 6px 6px">
+        <div class="table-scroll">
+          <table class="summary" id="nwTable"></table>
+        </div>
+      </div>
+    </div>
+
+    <footer class="legal">
+      <strong style="color:var(--text-secondary)">Cash flow &amp; net worth</strong> is your own money, kept
+      separate from the equity model — figures here are <strong>actual dollars</strong>, not millions.
+      Net&nbsp;Worth<sub>p</sub> = Net&nbsp;Worth<sub>p−1</sub> × (1 + r) + (income − expenses), applied once per pay period,
+      where r = (1 + annual&nbsp;return)<sup>1/periods per year</sup> − 1 — so switching between monthly and bi-weekly
+      changes when money lands, never the annual return itself. Income and expenses are held flat across the horizon;
+      <em>Savings only</em> is the same money with the return set to zero, so the gap between the two lines is the
+      compounding. This is a projection, not advice or a guarantee — real returns vary year to year.
     </footer>
   </div>
 </div>
@@ -3149,6 +3163,7 @@ const VIEW_KEY = "projectionModel.view.v1";
 const VIEWS = {
   projection: { mark: "FP", title: "Projection Model",    sub: "Scenario terminal · 2026–2030" },
   calculator: { mark: "CI", title: "Compound Calculator", sub: "Growth with regular contributions" },
+  networth:   { mark: "NW", title: "Net Worth Tracker",   sub: "Your own cash flow and net worth path" },
 };
 let currentView = "projection";
 
@@ -3157,6 +3172,7 @@ function setView(v) {
   currentView = v;
   document.getElementById("viewProjection").hidden = v !== "projection";
   document.getElementById("viewCalculator").hidden = v !== "calculator";
+  document.getElementById("viewNetWorth").hidden = v !== "networth";
   document.querySelectorAll("[data-view-only]").forEach(node => {
     node.hidden = node.dataset.viewOnly !== v;
   });
@@ -3169,6 +3185,7 @@ function setView(v) {
   });
   try { localStorage.setItem(VIEW_KEY, v); } catch { /* private mode */ }
   if (v === "calculator") renderCalculator();
+  if (v === "networth") renderNW();
 }
 
 function closeProductMenu() {
