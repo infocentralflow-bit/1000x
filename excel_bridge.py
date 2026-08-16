@@ -938,10 +938,14 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/watchlist/history":
             qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             ticker = (qs.get("ticker") or [""])[0].strip().upper()
+            range_key = (qs.get("range") or ["3mo"])[0].strip().lower()
             if not TICKER_RE.match(ticker):
                 self._json({"error": "Invalid ticker."}, 400)
                 return
-            points, err = quotes_service.fetch_history(ticker)
+            if range_key not in quotes_service.HISTORY_RANGES:
+                self._json({"error": "Invalid range."}, 400)
+                return
+            points, err = quotes_service.fetch_history(ticker, range_key)
             if err:
                 self._json({"ticker": ticker, "points": [], "error": err}, 502)
                 return

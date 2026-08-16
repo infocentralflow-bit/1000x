@@ -171,6 +171,20 @@ body {
 .watchlist-chart-meta .wl-change { font-size: 13px; }
 .watchlist-chart-status { margin-top: 10px; font-size: 12px; color: var(--text-muted); text-align: center; }
 .watchlist-chart-status.err { color: #ff9d9d; }
+.watchlist-range-row { display: flex; gap: 5px; margin-bottom: 12px; }
+.wl-range-btn {
+  padding: 5px 10px; border-radius: var(--r-sm);
+  border: 1px solid var(--hairline); background: var(--surface-2);
+  color: var(--text-muted); font: inherit; font-size: 11.5px; font-weight: 650;
+  cursor: pointer; transition: all .15s var(--ease);
+}
+@media (hover: hover) and (pointer: fine) {
+  .wl-range-btn:hover { color: var(--text-primary); border-color: rgba(255,255,255,.24); }
+}
+.wl-range-btn:focus-visible { outline: 2px solid var(--gold-dim); outline-offset: 1px; }
+.wl-range-btn.is-active {
+  background: rgba(255,217,102,.1); border-color: rgba(255,217,102,.4); color: var(--gold);
+}
 
 /* The brand doubles as the product switcher, so the growing app family costs
    no extra horizontal room in an already-crowded bar (and no extra row on a
@@ -1473,6 +1487,15 @@ footer.legal code {
     </div>
     <div class="modal-body">
       <div class="watchlist-chart-meta" id="watchlistChartMeta"></div>
+      <div class="watchlist-range-row" id="watchlistRangeRow" role="tablist" aria-label="Chart range">
+        <button type="button" class="wl-range-btn" data-range="1d" role="tab">1D</button>
+        <button type="button" class="wl-range-btn" data-range="5d" role="tab">5D</button>
+        <button type="button" class="wl-range-btn" data-range="1mo" role="tab">1M</button>
+        <button type="button" class="wl-range-btn is-active" data-range="3mo" role="tab" aria-selected="true">3M</button>
+        <button type="button" class="wl-range-btn" data-range="6mo" role="tab">6M</button>
+        <button type="button" class="wl-range-btn" data-range="1y" role="tab">1Y</button>
+        <button type="button" class="wl-range-btn" data-range="ytd" role="tab">YTD</button>
+      </div>
       <div class="chart-wrap">
         <svg id="watchlistChartSvg" viewBox="0 0 640 220" role="img" aria-labelledby="watchlistChartSvgTitle">
           <title id="watchlistChartSvgTitle">Price chart</title>
@@ -2963,27 +2986,64 @@ watchlistAddInput.addEventListener("blur", () => {
   setTimeout(() => { if (!watchlistAddForm.hidden) closeWatchlistAddForm(); }, 150);
 });
 
-async function openWatchlistChart(ticker) {
+let watchlistChartTicker = null;
+let watchlistChartRange = "3mo";
+
+function openWatchlistChart(ticker) {
+  watchlistChartTicker = ticker;
+  watchlistChartRange = "3mo";
   document.getElementById("watchlistChartTitle").textContent = ticker;
   document.getElementById("watchlistChartMeta").innerHTML = watchlistChangeHtml(watchlistQuoteMap[ticker] || {});
+  updateWatchlistRangeButtons();
+  openModalEl(document.getElementById("watchlistChartModal"));
+  loadWatchlistChart();
+}
+
+function updateWatchlistRangeButtons() {
+  document.querySelectorAll("#watchlistRangeRow [data-range]").forEach(b => {
+    const active = b.dataset.range === watchlistChartRange;
+    b.classList.toggle("is-active", active);
+    b.setAttribute("aria-selected", active ? "true" : "false");
+  });
+}
+
+async function loadWatchlistChart() {
+  const ticker = watchlistChartTicker, range = watchlistChartRange;
   const statusEl = document.getElementById("watchlistChartStatus");
   statusEl.textContent = "Loading price history…";
   statusEl.className = "watchlist-chart-status";
-  renderWatchlistChart([]);
-  openModalEl(document.getElementById("watchlistChartModal"));
+  renderWatchlistChart([], range);
   try {
-    const res = await fetch(BRIDGE + "/api/watchlist/history?ticker=" + encodeURIComponent(ticker));
+    const res = await fetch(BRIDGE + "/api/watchlist/history?ticker=" + encodeURIComponent(ticker)
+      + "&range=" + encodeURIComponent(range));
     const j = await res.json();
     if (!res.ok || j.error) throw new Error(j.error || ("HTTP " + res.status));
-    renderWatchlistChart(j.points || []);
+    // The user may have switched ticker/range while this was in flight.
+    if (ticker !== watchlistChartTicker || range !== watchlistChartRange) return;
+    renderWatchlistChart(j.points || [], range);
     statusEl.textContent = "";
   } catch (e) {
+    if (ticker !== watchlistChartTicker || range !== watchlistChartRange) return;
     statusEl.textContent = "Couldn't load a chart — " + String(e.message || e);
     statusEl.className = "watchlist-chart-status err";
   }
 }
 
-function renderWatchlistChart(points) {
+document.getElementById("watchlistRangeRow").addEventListener("click", (ev) => {
+  const btn = ev.target.closest("[data-range]");
+  if (!btn || btn.classList.contains("is-active")) return;
+  watchlistChartRange = btn.dataset.range;
+  updateWatchlistRangeButtons();
+  loadWatchlistChart();
+});
+
+const WATCHLIST_INTRADAY_RANGES = new Set(["1d", "5d"]);
+function watchlistDateLabel(dateStr, range) {
+  if (WATCHLIST_INTRADAY_RANGES.has(range)) return (dateStr.split(" ")[1] || dateStr).slice(0, 5);
+  return dateStr.slice(5); // "YYYY-MM-DD" -> "MM-DD"
+}
+
+function renderWatchlistChart(points, range) {
   const svg = document.getElementById("watchlistChartSvg");
   [...svg.childNodes].forEach(n => { if (!["title", "desc"].includes(n.nodeName)) n.remove(); });
   const VBw = 640, VBh = 220, padL = 54, padR = 14, padT = 14, padB = 26;
@@ -3013,7 +3073,7 @@ function renderWatchlistChart(points) {
     const anchor = i === 0 ? "start" : i === points.length - 1 ? "end" : "middle";
     const t = el("text", { x: X(i), y: VBh - 6, "text-anchor": anchor,
       fill: "#78776f", "font-size": "10.5", "font-family": "inherit" });
-    t.textContent = points[i].date.slice(5);
+    t.textContent = watchlistDateLabel(points[i].date, range);
     svg.append(t);
   });
 
