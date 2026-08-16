@@ -21,7 +21,7 @@ If you ever need to recreate that shortcut, it points `pythonw.exe` at
 address bar ("Install this site as an app" / a ⊕-in-a-box icon). This registers a proper app
 with Windows — Start Menu entry, its own icon (pulled straight from `manifest.json`, same
 gold "FP" mark), and it works offline once loaded (a service worker caches the shell; your
-live data — `/api/*` — is never cached, so Refresh always hits the network for real). This
+live data — `/api/*` — is never cached, so it always hits the network for real). This
 supersedes the desktop shortcut's `--app=` window trick with a browser-native equivalent;
 either one is fine to use, the PWA install is just the more standard path going forward.
 
@@ -35,26 +35,25 @@ This one asks for a login (see [Viewing it on your phone](#viewing-it-on-your-ph
 for why) and opens a normal browser tab at <http://127.0.0.1:8765/>. `Ctrl+C` stops it.
 
 You can also just open `dashboard.html` directly — it works standalone as a calculator,
-but the **Refresh** button needs the bridge (a browser page can't reach into Excel).
+but pulling values from the workbook needs the bridge (a browser page can't reach into Excel).
 
-## What Refresh actually does
+## Where Company Inputs data comes from
 
-The bridge tries three paths in order and reports which one it used:
+There's no manual refresh button in the dashboard — on load, it silently asks the bridge
+for the workbook's numbers once and fills in Company Inputs if it finds any. The bridge
+tries, in order:
 
 | # | Path | Needs | Result |
 |---|------|-------|--------|
-| 1 | Writes the ticker into the workbook, runs Excel's `RefreshAll` (Power Query), saves, reads `Co_*` back | Excel + `pywin32` | Badge reads **Live from workbook** |
-| 2 | Calls the same two Alpha Vantage endpoints the M code uses, then writes the row to `Data_API` | An API key | Badge reads **Live from Alpha Vantage** |
-| 3 | Returns whatever values the workbook last saved | — | Badge reads **Live from workbook** |
+| 1 | Runs Excel's `RefreshAll` (Power Query), saves, reads `Co_*` back | Excel + `pywin32` | Live from workbook |
+| 2 | Calls the same two Alpha Vantage endpoints the M code uses, then writes the row to `Data_API` | An API key in the workbook's **API Key** cell | Live from Alpha Vantage |
+| 3 | Returns whatever values the workbook last saved | — | Live from workbook |
 
-**Path 2 is the useful one right now.** Your workbook currently reports
-`Workbook.Queries.Count == 0` — the Power Query was never saved into the file, which is
-exactly why the Company Inputs cells all read 0. Path 2 skips Power Query entirely: put an
-Alpha Vantage key in the top bar, hit Refresh, and the model fills in. Path 1 starts working
-by itself the moment you finish connecting the query in Excel.
-
-Enter the key in the dashboard's top bar, or leave it in the workbook's **API Key** cell and
-the bridge will pick it up automatically.
+If your workbook reports `Workbook.Queries.Count == 0` (Power Query never saved into the
+file), path 1 won't find anything — leave an Alpha Vantage key in the workbook's **API Key**
+cell so path 2 can fill the Company Inputs cells instead. Path 1 starts working by itself the
+moment you finish connecting the query in Excel. Any value can still be typed over by hand
+in the dashboard regardless of where it came from.
 
 ## Formula parity
 
@@ -80,7 +79,7 @@ editable — type over it and everything downstream recalculates instantly.
 
 ## Saving named projections
 
-Top bar, next to Refresh: a **New**, **Save**, and **Open** icon, plus the project name button.
+Top bar: a **New**, **Save**, and **Open** icon, plus the project name button.
 
 - **New** (also `Ctrl`+`Alt`+`N`) — blanks everything: Company Inputs, all three scenarios'
   assumptions back to their 10%/3%/18% defaults, unlocks 2026, clears the active project. If
@@ -117,8 +116,8 @@ Press **Lock 2026** (padlock, top right of that section) once the base year is r
 - **dims the entire 2026 column** in all three scenario tables and puts a padlock in its
   header, so your eye goes straight to 2027–2030;
 - makes the 2026 P/E cells read-only too, while every forward year stays editable;
-- **protects the base year from Refresh** — a fetch won't overwrite locked values, it just
-  tells you it didn't. Unlock first if you want the API to win.
+- **protects the base year from the startup load** — the automatic fetch won't overwrite
+  locked values, it just tells you it didn't. Unlock first if you want it to win.
 
 Click it again to unlock. Everything you type — values, lock state, and all forward-year
 assumptions — is saved in the browser on that device, so it survives a reload or a phone
@@ -130,7 +129,8 @@ being closed. **Reset** clears it and returns to defaults.
 self-contained (no server, no internet, no fonts to download) and it's already inside your
 OneDrive folder. Open the OneDrive app on your phone → `Documents/FWDBOTCODE/ProjectionApp/`
 → `dashboard.html` → open it in Safari or Chrome. Editing, locking, the chart and all three
-scenarios work fully offline; only *Refresh* needs the bridge. Tip: if OneDrive insists on
+scenarios work fully offline; only the automatic company-data load on startup needs the
+bridge. Tip: if OneDrive insists on
 downloading rather than opening it, email the file to yourself and open the attachment, or
 use "Share → Copy to Files" first. Add it to your home screen and it behaves like an app.
 
@@ -169,8 +169,8 @@ from anywhere, so it's now protected with a username/password (see below) — a 
    your password isn't sent in the clear.
 
 4. Open that URL on your phone. Your browser will show its normal login prompt — enter
-   the username/password from step 1. After that it behaves like the LAN version, Refresh
-   included, from anywhere with signal.
+   the username/password from step 1. After that it behaves like the LAN version, startup
+   data load included, from anywhere with signal.
 
 The free ngrok URL changes every time you restart the tunnel, and the tunnel only exists
 while `start_tunnel.bat` is running — closing it takes the app off the public internet
@@ -180,8 +180,8 @@ again immediately.
 
 - **Gold values** — calculated, same as the workbook's gold cells.
 - **Green values** — linked from Company Inputs (the 2026 column).
-- **Dashed cells** — editable assumptions. Edit one and the badge flips to *Manual overrides*
-  so you always know the numbers aren't straight from the workbook.
+- **Dashed cells** — editable assumptions, so you always know the numbers aren't required
+  to match the workbook.
 - Chart: hover for a crosshair and tooltip, or focus it and use **← →**. Series are
   labelled directly at their endpoints as well as in the legend, so colour is never the
   only cue.
@@ -227,8 +227,8 @@ pip install openpyxl pywin32
 
 ngrok/`start_tunnel.bat` only work while your PC is on — that's what's actually running the
 bridge. To be reachable with your computer off, the app has to move to a cloud host, which
-can't run Excel: **the "Refresh from Excel" path is unavailable there — Alpha Vantage refresh
-still works normally.** The code already detects this environment (`$PORT` set) and adjusts —
+can't run Excel: **the workbook-refresh path is unavailable there — Alpha Vantage still
+works normally.** The code already detects this environment (`$PORT` set) and adjusts —
 binds `0.0.0.0`, skips opening a local browser, skips the Excel attempt without complaint.
 
 This folder is already a git repo (`git log` to see the initial commit) with everything a
@@ -286,6 +286,4 @@ if `NEON_DATABASE_URL` is set, a local file otherwise).
 
 - The bridge binds to `127.0.0.1` only — nothing is exposed to your network.
 - Your API key is never written anywhere except the workbook cell you choose to put it in.
-- Alpha Vantage's free tier allows 25 requests/day and 5/minute; each refresh uses 2. If a
-  refresh returns a rate-limit message, the dashboard shows it verbatim rather than failing
-  silently.
+- Alpha Vantage's free tier allows 25 requests/day and 5/minute; each startup load uses 2.

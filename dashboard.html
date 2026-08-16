@@ -170,7 +170,6 @@ body {
   background: #08080a;
 }
 #ticker { width: 104px; text-transform: uppercase; letter-spacing: .08em; font-weight: 650; }
-#apikey { width: 168px; }
 
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
@@ -854,7 +853,6 @@ footer.legal code {
   .topbar .field { width: 100%; }
   .topbar .field .input, .topbar .project-name-btn { width: 100%; }
   .topbar .btn-cluster { width: 100%; justify-content: space-between; }
-  .topbar #btnRefresh { width: 100%; }
   .kpi-value { font-size: 23px; }
 
   table.model th, table.model td { padding: 6px 8px; font-size: 12.5px; }
@@ -964,15 +962,6 @@ footer.legal code {
       <input id="ticker" class="input" value="AAPL" autocomplete="off" spellcheck="false" aria-label="Stock ticker">
     </div>
 
-    <div class="field" data-view-only="projection">
-      <label for="apikey">Alpha Vantage key</label>
-      <input id="apikey" class="input" type="password" placeholder="optional" autocomplete="off" aria-label="Alpha Vantage API key">
-    </div>
-
-    <button id="btnRefresh" class="btn btn-primary" data-view-only="projection">
-      <span class="spinner" aria-hidden="true"></span>
-      <span id="refreshLabel">Refresh</span>
-    </button>
   </header>
 
   <div id="viewProjection">
@@ -2732,8 +2721,6 @@ async function probeBridge() {
     const r = await fetch(BRIDGE + "/api/health", { signal: AbortSignal.timeout(1200) });
     bridgeUp = r.ok;
   } catch { bridgeUp = false; }
-  const lbl = document.getElementById("refreshLabel");
-  lbl.textContent = bridgeUp ? "Refresh from Excel" : "Refresh";
   return bridgeUp;
 }
 
@@ -2762,54 +2749,6 @@ function applyCompany(d, src) {
   renderAll();
 }
 
-async function doRefresh() {
-  const btn = document.getElementById("btnRefresh");
-  const lbl = document.getElementById("refreshLabel");
-  const app = document.querySelector(".app");
-  btn.classList.add("is-busy");
-  btn.disabled = true;
-  app.style.transition = "opacity .2s";
-  app.style.opacity = ".72";          // hold previous render — no skeleton flash
-  const prev = lbl.textContent;
-
-  try {
-    await probeBridge();
-    const ticker = document.getElementById("ticker").value.trim().toUpperCase() || "AAPL";
-    const key = document.getElementById("apikey").value.trim();
-
-    if (bridgeUp) {
-      lbl.textContent = "Refreshing Excel…";
-      const r = await fetch(BRIDGE + "/api/refresh", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticker, apiKey: key || undefined }),
-      });
-      const j = await r.json();
-      if (!r.ok || j.error) throw new Error(j.error || ("HTTP " + r.status));
-      applyCompany(j, j.source === "alphavantage" ? "api" : "workbook");
-      toast(j.message || "Workbook refreshed.");
-    } else {
-      throw new Error("bridge-down");
-    }
-  } catch (e) {
-    if (String(e.message) === "bridge-down") {
-      showNotice(
-        "<strong>Excel bridge isn't running.</strong> Start it with " +
-        "<code style=\"background:rgba(0,0,0,.35);padding:1px 5px;border-radius:4px\">run_dashboard.bat</code> " +
-        "to pull live values from the workbook and trigger Power Query. " +
-        "Until then, every cell below is still editable by hand."
-      );
-    } else {
-      showNotice("<strong>Refresh failed.</strong> " + escapeHtml(String(e.message)));
-    }
-  } finally {
-    btn.classList.remove("is-busy");
-    btn.disabled = false;
-    lbl.textContent = bridgeUp ? "Refresh from Excel" : "Refresh";
-    app.style.opacity = "1";
-  }
-}
-
 function escapeHtml(s) {
   return s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
@@ -2818,14 +2757,6 @@ function showNotice(html) {
   document.getElementById("noticeText").innerHTML = html;
   n.classList.remove("hidden");
   noticeDismissed = false;
-}
-function toast(msg) {
-  const n = document.getElementById("notice");
-  document.getElementById("noticeText").innerHTML = "<strong>" + escapeHtml(msg) + "</strong>";
-  n.style.borderColor = "rgba(6,176,122,.35)";
-  n.style.background = "linear-gradient(180deg, rgba(6,176,122,.08), rgba(6,176,122,.03))";
-  n.classList.remove("hidden");
-  setTimeout(() => { n.classList.add("hidden"); n.style.borderColor = ""; n.style.background = ""; }, 3200);
 }
 
 /* ── Render orchestration ─────────────────────────────────────────────────
@@ -3572,7 +3503,6 @@ document.getElementById("btnNwLogClear").addEventListener("click", clearLogForm)
 ["nwLogIncome", "nwLogExpenses", "nwLogNetWorth"].forEach(id => {
   document.getElementById(id).addEventListener("input", (ev) => sanitizeNumericInput(ev.target));
 });
-document.getElementById("btnRefresh").addEventListener("click", doRefresh);
 document.getElementById("btnLock").addEventListener("click", toggleLock);
 document.getElementById("btnReset").addEventListener("click", resetAll);
 document.getElementById("btnDismiss").addEventListener("click", () => {
