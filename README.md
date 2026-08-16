@@ -296,7 +296,10 @@ server), so it stays hidden if you open `dashboard.html` standalone.
 - Click a chip's ticker/price to open a price chart for it, with a range picker —
   **1D, 5D, 1M, 3M, 6M, 1Y, YTD** (1D/5D use intraday bars, everything else daily closes).
   Fetched on demand per range, not cached or pre-fetched — only requested when you actually
-  open a chart or switch ranges.
+  open a chart or switch ranges. The price/change header updates to match the selected
+  range (e.g. the 6M button shows the 6-month change, not the day's).
+- Hover (or arrow-key through, once the chart has focus) any point on the chart for a
+  crosshair and a tooltip with that point's exact date and close.
 - Quotes come from `yfinance` (Yahoo Finance), fetched server-side in `quotes_service.py` and
   cached for 20 seconds so a fast reload doesn't refetch every ticker; the strip itself
   polls every 60 seconds while the tab is visible.

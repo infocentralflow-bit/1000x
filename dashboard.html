@@ -1517,9 +1517,10 @@ footer.legal code {
         <button type="button" class="wl-range-btn" data-range="ytd" role="tab">YTD</button>
       </div>
       <div class="chart-wrap">
-        <svg id="watchlistChartSvg" viewBox="0 0 640 220" role="img" aria-labelledby="watchlistChartSvgTitle">
+        <svg id="watchlistChartSvg" viewBox="0 0 640 220" role="img" aria-labelledby="watchlistChartSvgTitle" tabindex="0">
           <title id="watchlistChartSvgTitle">Price chart</title>
         </svg>
+        <div id="watchlistChartTooltip" class="tooltip" role="status" aria-live="polite"></div>
       </div>
       <div class="watchlist-chart-status" id="watchlistChartStatus"></div>
     </div>
@@ -3057,13 +3058,26 @@ async function loadWatchlistChart() {
     if (!res.ok || j.error) throw new Error(j.error || ("HTTP " + res.status));
     // The user may have switched ticker/range while this was in flight.
     if (ticker !== watchlistChartTicker || range !== watchlistChartRange) return;
-    renderWatchlistChart(j.points || [], range);
+    const points = j.points || [];
+    renderWatchlistChart(points, range);
+    document.getElementById("watchlistChartMeta").innerHTML = watchlistRangeChangeHtml(points);
     statusEl.textContent = "";
   } catch (e) {
     if (ticker !== watchlistChartTicker || range !== watchlistChartRange) return;
     statusEl.textContent = "Couldn't load a chart — " + String(e.message || e);
     statusEl.className = "watchlist-chart-status err";
   }
+}
+
+function watchlistRangeChangeHtml(points) {
+  if (!points.length) return "";
+  const first = points[0].close, last = points[points.length - 1].close;
+  const change = last - first;
+  const changePct = first ? (change / first * 100) : 0;
+  const dir = changePct > 0 ? "up" : changePct < 0 ? "down" : "flat";
+  const sign = changePct > 0 ? "+" : "";
+  return `<span class="wl-price">$${last.toFixed(2)}</span>
+    <span class="wl-change ${dir}">${sign}${changePct.toFixed(2)}%</span>`;
 }
 
 document.getElementById("watchlistRangeRow").addEventListener("click", (ev) => {
@@ -3078,6 +3092,12 @@ const WATCHLIST_INTRADAY_RANGES = new Set(["1d", "5d"]);
 function watchlistDateLabel(dateStr, range) {
   if (WATCHLIST_INTRADAY_RANGES.has(range)) return (dateStr.split(" ")[1] || dateStr).slice(0, 5);
   return dateStr.slice(5); // "YYYY-MM-DD" -> "MM-DD"
+}
+function watchlistFullDateLabel(dateStr) {
+  const [datePart, timePart] = dateStr.split(" ");
+  const d = new Date(datePart + "T00:00:00");
+  const label = d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return timePart ? `${label} · ${timePart}` : label;
 }
 
 function renderWatchlistChart(points, range) {
@@ -3114,12 +3134,98 @@ function renderWatchlistChart(points, range) {
     svg.append(t);
   });
 
+  // crosshair (behind the line, shown/moved on hover)
+  const crosshair = el("line", { id: "wlCrosshair", stroke: "#4a4a46", "stroke-width": "1",
+    y1: padT, y2: padT + plotH, opacity: "0", "shape-rendering": "crispEdges" });
+  svg.append(crosshair);
+
   const d = points.map((p, i) => `${i ? "L" : "M"}${X(i).toFixed(2)},${Y(p.close).toFixed(2)}`).join(" ");
   svg.append(el("path", { d, fill: "none", stroke: "#3987e5", "stroke-width": "2",
     "stroke-linejoin": "round", "stroke-linecap": "round" }));
 
   const lastI = points.length - 1;
   svg.append(el("circle", { cx: X(lastI), cy: Y(points[lastI].close), r: "3.5", fill: "#3987e5" }));
+
+  // hover dot, drawn on top of the line and end marker
+  svg.append(el("circle", { id: "wlCrosshairDot", r: "4.5", fill: "#3987e5",
+    stroke: "#16161a", "stroke-width": "2", opacity: "0" }));
+
+  attachWatchlistHover(points, X, Y, padT, plotH);
+}
+
+let watchlistHoverIdx = null;
+
+function attachWatchlistHover(points, X, Y, padT, plotH) {
+  const svg = document.getElementById("watchlistChartSvg");
+  const n = points.length;
+  const bw = n > 1 ? (X(1) - X(0)) : 40;
+  watchlistHoverIdx = null;
+
+  points.forEach((p, i) => {
+    const rect = el("rect", { x: X(i) - bw / 2, y: padT, width: bw, height: plotH,
+      fill: "transparent", "data-hit": i });
+    rect.addEventListener("mouseenter", () => showWatchlistTooltip(i, points, X, Y));
+    rect.addEventListener("mousemove", () => showWatchlistTooltip(i, points, X, Y));
+    svg.append(rect);
+  });
+  svg.addEventListener("mouseleave", hideWatchlistTooltip);
+
+  const pickIndexFromClientX = (clientX) => {
+    const rect = svg.getBoundingClientRect();
+    const scale = rect.width / 640;
+    const localX = (clientX - rect.left) / scale;
+    return Math.max(0, Math.min(n - 1, Math.round((localX - X(0)) / (bw || 1))));
+  };
+  const touchUpdate = (ev) => {
+    const t = ev.touches[0] || ev.changedTouches[0];
+    if (!t) return;
+    showWatchlistTooltip(pickIndexFromClientX(t.clientX), points, X, Y);
+  };
+  svg.addEventListener("touchstart", touchUpdate, { passive: true });
+  svg.addEventListener("touchmove", touchUpdate, { passive: true });
+  svg.addEventListener("touchend", hideWatchlistTooltip, { passive: true });
+
+  svg.onkeydown = (ev) => {
+    if (ev.key !== "ArrowLeft" && ev.key !== "ArrowRight") return;
+    ev.preventDefault();
+    const cur = watchlistHoverIdx === null ? 0 : watchlistHoverIdx;
+    const next = Math.max(0, Math.min(n - 1, cur + (ev.key === "ArrowRight" ? 1 : -1)));
+    showWatchlistTooltip(next, points, X, Y);
+  };
+  svg.onblur = hideWatchlistTooltip;
+}
+
+function showWatchlistTooltip(i, points, X, Y) {
+  watchlistHoverIdx = i;
+  const p = points[i];
+  const svg = document.getElementById("watchlistChartSvg");
+  const tip = document.getElementById("watchlistChartTooltip");
+
+  const ch = svg.querySelector("#wlCrosshair");
+  if (ch) { ch.setAttribute("x1", X(i)); ch.setAttribute("x2", X(i)); ch.setAttribute("opacity", "1"); }
+  const dot = svg.querySelector("#wlCrosshairDot");
+  if (dot) { dot.setAttribute("cx", X(i)); dot.setAttribute("cy", Y(p.close)); dot.setAttribute("opacity", "1"); }
+
+  tip.innerHTML = `<div class="tt-year">${watchlistFullDateLabel(p.date)}</div>
+    <div class="tt-row"><span class="name">Close</span><span class="val">$${p.close.toFixed(2)}</span></div>`;
+  tip.classList.add("show");
+
+  const rect = svg.getBoundingClientRect();
+  const scale = rect.width / 640;
+  const cx = X(i) * scale;
+  const left = Math.min(Math.max(cx + 16, 8), rect.width - tip.offsetWidth - 8);
+  tip.style.left = left + "px";
+  tip.style.top = "8px";
+}
+
+function hideWatchlistTooltip() {
+  watchlistHoverIdx = null;
+  const svg = document.getElementById("watchlistChartSvg");
+  document.getElementById("watchlistChartTooltip").classList.remove("show");
+  const ch = svg.querySelector("#wlCrosshair");
+  if (ch) ch.setAttribute("opacity", "0");
+  const dot = svg.querySelector("#wlCrosshairDot");
+  if (dot) dot.setAttribute("opacity", "0");
 }
 
 function applyCompany(d, src) {
