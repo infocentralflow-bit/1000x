@@ -740,6 +740,21 @@ textarea.notion-notes[disabled] { opacity: .5; cursor: not-allowed; }
 .tooltip .tt-row .name { color: var(--text-secondary); }
 .tooltip .tt-row .val { margin-left: auto; font-weight: 650; font-variant-numeric: tabular-nums; color: var(--text-primary); }
 
+/* Watchlist chart tooltip: smaller and translucent (frosted, not opaque) so
+   the line stays visible underneath instead of getting blotted out. */
+#watchlistChartTooltip {
+  min-width: 0;
+  padding: 7px 10px;
+  background: rgba(10,10,12,.62);
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+  font-size: 11px;
+}
+#watchlistChartTooltip .tt-year {
+  font-size: 10px; padding-bottom: 4px; margin-bottom: 4px;
+}
+#watchlistChartTooltip .tt-row { padding: 1px 0; gap: 14px; }
+
 /* ── Tables ──────────────────────────────────────────────────────────────── */
 .table-scroll { overflow-x: auto; }
 table.model { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
