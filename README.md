@@ -293,6 +293,8 @@ key needed, no separate setup. Needs the bridge (same as everything else that ta
 server), so it stays hidden if you open `dashboard.html` standalone.
 
 - Tap **+** to add a ticker, **×** on a chip to remove one.
+- Click a chip's ticker/price to open a 3-month price chart for it, fetched on demand
+  (not cached or pre-fetched — only requested when you actually open one).
 - Quotes come from `yfinance` (Yahoo Finance), fetched server-side in `quotes_service.py` and
   cached for 20 seconds so a fast reload doesn't refetch every ticker; the strip itself
   polls every 60 seconds while the tab is visible.

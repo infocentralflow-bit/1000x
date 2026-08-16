@@ -48,3 +48,26 @@ def _fetch_one(yf, ticker):
 
 def _error(ticker, message):
     return {"ticker": ticker, "price": None, "change": None, "changePct": None, "error": message}
+
+
+def fetch_history(ticker, period="3mo"):
+    """Returns (points, error) — points is a list of {"date": "YYYY-MM-DD", "close": float},
+    oldest first. Not cached: only fetched when a chart is actually opened."""
+    try:
+        import yfinance as yf
+    except ImportError:
+        return None, "yfinance isn't installed on the server"
+
+    try:
+        hist = yf.Ticker(ticker).history(period=period)
+    except Exception as exc:                                        # noqa: BLE001
+        return None, str(exc) or "Couldn't reach the quote server."
+
+    if hist.empty:
+        return None, "No price history found for this ticker."
+
+    points = [
+        {"date": idx.strftime("%Y-%m-%d"), "close": round(float(row["Close"]), 2)}
+        for idx, row in hist.iterrows()
+    ]
+    return points, None
