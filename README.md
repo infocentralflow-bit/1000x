@@ -207,6 +207,8 @@ most vivid red/green combinations in this lightness band do.
 |---|---|
 | `dashboard.html` | The whole app — no build step, no dependencies, works offline |
 | `excel_bridge.py` | Local server: reads the workbook, drives Excel, calls the API, hosts saved-projection files |
+| `notion_service.py` | Notion API client used by the Notion Research feature |
+| `quotes_service.py` | yfinance wrapper used by the watchlist strip |
 | `run_dashboard.bat` | One-click launcher (asks for login) |
 | `launch_app.py` / desktop shortcut | Silent launcher for the no-login local app window |
 | `start_tunnel.bat` | ngrok tunnel for cellular access |
@@ -218,9 +220,11 @@ most vivid red/green combinations in this lightness band do.
 
 - `openpyxl` — required
 - `pywin32` — optional, enables the real Excel Power Query refresh (path 1)
+- `yfinance` — optional, powers the watchlist strip; without it, watchlist tickers just show
+  "no quote" instead of a price
 
 ```bash
-pip install openpyxl pywin32
+pip install openpyxl pywin32 yfinance
 ```
 
 ## Running it always-on (no PC required)
@@ -281,6 +285,20 @@ The token never reaches the browser — every Notion API call happens in `excel_
 (`notion_service.py`), same as the Alpha Vantage calls already do. Which Notion page belongs
 to which saved projection is stored the same way saved projections themselves are (Postgres
 if `NEON_DATABASE_URL` is set, a local file otherwise).
+
+## Watchlist
+
+A short-list strip under the top bar with a live price and day change per ticker — no API
+key needed, no separate setup. Needs the bridge (same as everything else that talks to a
+server), so it stays hidden if you open `dashboard.html` standalone.
+
+- Tap **+** to add a ticker, **×** on a chip to remove one.
+- Quotes come from `yfinance` (Yahoo Finance), fetched server-side in `quotes_service.py` and
+  cached for 20 seconds so a fast reload doesn't refetch every ticker; the strip itself
+  polls every 60 seconds while the tab is visible.
+- The list is shared across your saved projections (one bridge, one watchlist) and stored the
+  same way everything else here is — Postgres if `NEON_DATABASE_URL` is set, a local
+  `watchlist.json` file otherwise. Capped at 12 tickers.
 
 ## Notes
 

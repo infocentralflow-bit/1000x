@@ -39,6 +39,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import openpyxl
 
 import notion_service
+import quotes_service
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WORKBOOK = os.path.normpath(os.path.join(HERE, "..", "Financial_Projection_Model.xlsx"))
@@ -180,6 +181,15 @@ def pg_init():
                     database_id   TEXT NOT NULL,
                     database_name TEXT NOT NULL,
                     updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+            """)
+            # Same single-row shape as notion_settings — one shared watchlist,
+            # stored as a JSON array of tickers.
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS watchlist (
+                    id         TEXT PRIMARY KEY DEFAULT 'default',
+                    tickers    TEXT NOT NULL,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
                 )
             """)
             conn.commit()
@@ -343,6 +353,70 @@ def set_notion_settings(database_id, database_name):
         return True, None
     except OSError as exc:
         return False, f"Could not write settings file: {exc}"
+
+
+# ── Watchlist: a short list of tickers for the header strip ─────────────────
+# Same file/Postgres split as everything else above. One shared list — this
+# bridge has one user, not per-user accounts.
+WATCHLIST_FILE = os.path.join(HERE, "watchlist.json")
+WATCHLIST_MAX = 12
+TICKER_RE = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
+
+
+def get_watchlist():
+    """Returns the saved ticker list (uppercase strings), in saved order."""
+    if USE_PG:
+        try:
+            with _pg_connect() as conn, conn.cursor() as cur:
+                cur.execute("SELECT tickers FROM watchlist WHERE id = 'default'")
+                row = cur.fetchone()
+            if not row:
+                return []
+            data = json.loads(row[0])
+            return data if isinstance(data, list) else []
+        except Exception as exc:                                  # noqa: BLE001
+            print(f"[bridge] Postgres read (watchlist) failed: {exc}", flush=True)
+            return []
+
+    try:
+        with open(WATCHLIST_FILE, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        if isinstance(data, list):
+            return [t for t in data if isinstance(t, str)]
+    except (OSError, json.JSONDecodeError):
+        pass
+    return []
+
+
+def set_watchlist(tickers):
+    """Validates, dedupes, and caps the list, then saves it. Returns (ok, tickers_or_error)."""
+    clean = []
+    for raw in tickers:
+        t = str(raw or "").strip().upper()
+        if t and TICKER_RE.match(t) and t not in clean:
+            clean.append(t)
+    clean = clean[:WATCHLIST_MAX]
+
+    if USE_PG:
+        try:
+            with _pg_connect() as conn, conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO watchlist (id, tickers, updated_at)
+                    VALUES ('default', %s, now())
+                    ON CONFLICT (id) DO UPDATE
+                        SET tickers = EXCLUDED.tickers, updated_at = now()
+                """, (json.dumps(clean),))
+                conn.commit()
+            return True, clean
+        except Exception as exc:                                  # noqa: BLE001
+            return False, f"Could not save to database: {exc}"
+
+    try:
+        with open(WATCHLIST_FILE, "w", encoding="utf-8") as fh:
+            json.dump(clean, fh, indent=2)
+        return True, clean
+    except OSError as exc:
+        return False, f"Could not write watchlist file: {exc}"
 
 
 def read_company():
@@ -856,6 +930,11 @@ class Handler(BaseHTTPRequestHandler):
             })
             return
 
+        if path == "/api/watchlist":
+            tickers = get_watchlist()
+            self._json({"tickers": tickers, "quotes": quotes_service.fetch_quotes(tickers)})
+            return
+
         if path == "/api/notion/databases":
             if not NOTION_TOKEN:
                 self._json({"error": "Notion isn't configured on the server yet."}, 400)
@@ -922,6 +1001,19 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": err}, 400)
                 return
             self._json({"ok": True})
+            return
+
+        if path == "/api/watchlist":
+            payload = self._read_json_body()
+            raw = payload.get("tickers")
+            if not isinstance(raw, list):
+                self._json({"error": "tickers must be a list."}, 400)
+                return
+            ok, result = set_watchlist(raw)
+            if not ok:
+                self._json({"error": result}, 500)
+                return
+            self._json({"tickers": result, "quotes": quotes_service.fetch_quotes(result)})
             return
 
         if path == "/api/notion/settings":

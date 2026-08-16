@@ -88,6 +88,76 @@ body {
   position: sticky; top: 12px; z-index: 40;
   backdrop-filter: blur(8px);
 }
+
+/* ── Watchlist bar ─────────────────────────────────────────────────────────
+   Sits below the topbar, outside any single product view — a quick-glance
+   strip of live quotes that persists across Projection/Calculator/Net Worth. */
+.watchlist-bar {
+  display: flex; align-items: center; gap: 8px;
+  margin: -10px 0 22px;
+  padding: 9px 12px;
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+}
+.watchlist-bar[hidden] { display: none; }
+.watchlist-scroll {
+  display: flex; align-items: center; gap: 7px;
+  overflow-x: auto; scrollbar-width: none;
+  flex: 1; min-width: 0;
+}
+.watchlist-scroll::-webkit-scrollbar { display: none; }
+.watchlist-empty { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+.watchlist-chip {
+  display: inline-flex; align-items: center; gap: 8px; flex: none;
+  padding: 6px 8px 6px 11px; border-radius: 999px;
+  background: var(--surface-2); border: 1px solid var(--hairline);
+  font: inherit; color: inherit; cursor: default;
+  transition: border-color .15s var(--ease), background .15s var(--ease);
+}
+@media (hover: hover) and (pointer: fine) {
+  .watchlist-chip:hover { border-color: rgba(255,255,255,.2); background: #1a1a20; }
+}
+.watchlist-chip .wl-sym { font-size: 12px; font-weight: 700; letter-spacing: .02em; }
+.watchlist-chip .wl-price { font-size: 12px; font-weight: 600; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.watchlist-chip .wl-change { font-size: 11px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.watchlist-chip .wl-change.up { color: #35c294; }
+.watchlist-chip .wl-change.down { color: #ff8f8f; }
+.watchlist-chip .wl-change.flat { color: var(--text-muted); }
+.watchlist-chip .wl-err { font-size: 11px; color: var(--text-muted); font-style: italic; }
+.watchlist-chip .wl-remove {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; padding: 0; margin-left: 1px; flex: none;
+  border: none; border-radius: 50%; background: none; color: var(--text-muted);
+  font-size: 13px; line-height: 1; cursor: pointer; opacity: .55;
+  transition: opacity .15s var(--ease), background .15s var(--ease), color .15s var(--ease);
+}
+.watchlist-chip .wl-remove:hover { opacity: 1; background: rgba(255,157,157,.15); color: #ff9d9d; }
+.watchlist-chip .wl-remove:focus-visible { outline: 2px solid var(--gold-dim); outline-offset: 1px; opacity: 1; }
+.watchlist-add-btn, .watchlist-add-input {
+  flex: none;
+}
+.watchlist-add-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; padding: 0;
+  border-radius: 50%; border: 1px dashed var(--hairline);
+  background: none; color: var(--text-muted);
+  font-size: 16px; line-height: 1; cursor: pointer;
+  transition: all .15s var(--ease);
+}
+@media (hover: hover) and (pointer: fine) {
+  .watchlist-add-btn:hover { color: var(--text-primary); border-color: rgba(255,255,255,.32); border-style: solid; }
+}
+.watchlist-add-btn:focus-visible { outline: 2px solid var(--gold-dim); outline-offset: 2px; }
+.watchlist-add-form[hidden] { display: none; }
+.watchlist-add-input {
+  width: 84px; background: var(--plane); border: 1px solid var(--gold-dim);
+  color: var(--text-primary); border-radius: var(--r-sm);
+  padding: 5px 9px; font: inherit; font-size: 12px;
+  text-transform: uppercase; letter-spacing: .04em;
+}
+.watchlist-add-input:focus { outline: none; box-shadow: 0 0 0 3px var(--gold-glow); }
+
 /* The brand doubles as the product switcher, so the growing app family costs
    no extra horizontal room in an already-crowded bar (and no extra row on a
    phone, where the topbar is stacked). */
@@ -963,6 +1033,15 @@ footer.legal code {
     </div>
 
   </header>
+
+  <div class="watchlist-bar" id="watchlistBar" hidden>
+    <div class="watchlist-scroll" id="watchlistScroll" role="list" aria-label="Watchlist"></div>
+    <form id="watchlistAddForm" class="watchlist-add-form" hidden>
+      <input id="watchlistAddInput" class="watchlist-add-input" type="text" maxlength="10"
+        autocomplete="off" spellcheck="false" placeholder="Ticker" aria-label="Add ticker to watchlist">
+    </form>
+    <button type="button" id="btnWatchlistAdd" class="watchlist-add-btn" title="Add a ticker to your watchlist" aria-label="Add ticker">+</button>
+  </div>
 
   <div id="viewProjection">
 
@@ -2724,6 +2803,129 @@ async function probeBridge() {
   return bridgeUp;
 }
 
+/* ── Watchlist bar ─────────────────────────────────────────────────────────
+   A short, server-saved ticker list with live quotes (yfinance, via the
+   bridge — a browser page can't call it directly). Needs the bridge, same
+   as Notion sync, so it stays hidden when there's nothing to talk to. */
+let watchlistTickers = [];
+let watchlistQuoteMap = {};
+let watchlistTimer = null;
+
+function watchlistChipHtml(ticker, q) {
+  q = q || {};
+  let middleHtml;
+  if (q.error) {
+    middleHtml = `<span class="wl-err" title="${escapeHtml(q.error)}">no quote</span>`;
+  } else if (q.price == null) {
+    middleHtml = '<span class="wl-err">loading…</span>';
+  } else {
+    const dir = q.changePct > 0 ? "up" : q.changePct < 0 ? "down" : "flat";
+    const sign = q.changePct > 0 ? "+" : "";
+    middleHtml = `<span class="wl-price">$${q.price.toFixed(2)}</span>
+      <span class="wl-change ${dir}">${sign}${q.changePct.toFixed(2)}%</span>`;
+  }
+  return `<div class="watchlist-chip" role="listitem" data-ticker="${ticker}">
+      <span class="wl-sym">${ticker}</span>
+      ${middleHtml}
+      <button type="button" class="wl-remove" data-remove="${ticker}" title="Remove ${ticker}" aria-label="Remove ${ticker} from watchlist">×</button>
+    </div>`;
+}
+
+function renderWatchlist() {
+  const scroll = document.getElementById("watchlistScroll");
+  if (!watchlistTickers.length) {
+    scroll.innerHTML = '<span class="watchlist-empty">No tickers yet — tap + to add one.</span>';
+    return;
+  }
+  scroll.innerHTML = watchlistTickers.map(t => watchlistChipHtml(t, watchlistQuoteMap[t])).join("");
+}
+
+function applyWatchlistResult(j) {
+  watchlistTickers = j.tickers || [];
+  watchlistQuoteMap = {};
+  (j.quotes || []).forEach(q => { watchlistQuoteMap[q.ticker] = q; });
+  renderWatchlist();
+}
+
+async function loadWatchlist() {
+  try {
+    const res = await fetch(BRIDGE + "/api/watchlist");
+    const j = await res.json();
+    if (!res.ok) throw new Error(j.error || ("HTTP " + res.status));
+    applyWatchlistResult(j);
+  } catch { /* transient failure — leave whatever was last rendered */ }
+}
+
+async function saveWatchlist(tickers) {
+  const res = await fetch(BRIDGE + "/api/watchlist", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tickers }),
+  });
+  const j = await res.json();
+  if (!res.ok || j.error) throw new Error(j.error || ("HTTP " + res.status));
+  applyWatchlistResult(j);
+}
+
+async function addWatchlistTicker(raw) {
+  const t = raw.trim().toUpperCase();
+  if (!t || watchlistTickers.includes(t)) return;
+  try {
+    await saveWatchlist([...watchlistTickers, t]);
+  } catch (e) {
+    flashToast("Couldn't add " + t + " — " + String(e.message || e), true);
+  }
+}
+
+async function removeWatchlistTicker(t) {
+  try {
+    await saveWatchlist(watchlistTickers.filter(x => x !== t));
+  } catch (e) {
+    flashToast("Couldn't remove " + t + " — " + String(e.message || e), true);
+  }
+}
+
+function initWatchlist(bridgeIsUp) {
+  const bar = document.getElementById("watchlistBar");
+  clearInterval(watchlistTimer);
+  if (!bridgeIsUp) { bar.hidden = true; return; }
+  bar.hidden = false;
+  loadWatchlist();
+  watchlistTimer = setInterval(() => {
+    if (document.visibilityState === "visible") loadWatchlist();
+  }, 60000);
+}
+
+document.getElementById("watchlistScroll").addEventListener("click", (ev) => {
+  const btn = ev.target.closest("[data-remove]");
+  if (btn) removeWatchlistTicker(btn.dataset.remove);
+});
+const btnWatchlistAdd = document.getElementById("btnWatchlistAdd");
+const watchlistAddForm = document.getElementById("watchlistAddForm");
+const watchlistAddInput = document.getElementById("watchlistAddInput");
+function closeWatchlistAddForm() {
+  watchlistAddForm.hidden = true;
+  btnWatchlistAdd.hidden = false;
+}
+btnWatchlistAdd.addEventListener("click", () => {
+  btnWatchlistAdd.hidden = true;
+  watchlistAddForm.hidden = false;
+  watchlistAddInput.value = "";
+  watchlistAddInput.focus();
+});
+watchlistAddForm.addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const val = watchlistAddInput.value;
+  closeWatchlistAddForm();
+  if (val.trim()) await addWatchlistTicker(val);
+});
+watchlistAddInput.addEventListener("keydown", (ev) => {
+  if (ev.key === "Escape") closeWatchlistAddForm();
+});
+watchlistAddInput.addEventListener("blur", () => {
+  // Give a real submit (Enter) a moment to fire first; otherwise just close.
+  setTimeout(() => { if (!watchlistAddForm.hidden) closeWatchlistAddForm(); }, 150);
+});
+
 function applyCompany(d, src) {
   // A locked base year is deliberate: don't let a refresh silently overwrite it.
   if (locked) {
@@ -4025,6 +4227,7 @@ if (!bootedFromProject) {
 (async () => {
   const up = await probeBridge();
   if (up) await syncFromBridge();   // pick up anything saved on another machine
+  initWatchlist(up);
 
   // Don't clobber the user's own saved numbers with a workbook read.
   if (hadSaved) return;
