@@ -177,7 +177,7 @@ body {
   padding: 9px 16px; border-radius: var(--r-sm);
   border: 1px solid transparent;
   font: inherit; font-size: 13px; font-weight: 650;
-  cursor: pointer;
+  cursor: pointer; text-decoration: none;   /* .btn is also used on <a> (e.g. "Open Notion Research") */
   transition: transform .14s var(--ease), box-shadow .18s var(--ease),
               background .18s var(--ease), border-color .18s var(--ease), opacity .18s;
 }
@@ -528,6 +528,31 @@ th.year0 .hdr-lock { margin-left: 5px; opacity: .8; vertical-align: -1px; }
   background: var(--accent);
   box-shadow: 0 0 0 2px var(--surface-1), 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
 }
+
+/* ── Notion Research ──────────────────────────────────────────────────────── */
+.notion-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.notion-status { font-size: 12px; color: var(--text-muted); }
+.notion-status.ok   { color: #35c294; }
+.notion-status.busy { color: var(--gold); }
+.notion-status.err  { color: #ff9d9d; }
+textarea.notion-notes {
+  width: 100%; min-height: 84px; resize: vertical;
+  font-size: 13.5px; font-weight: 500; line-height: 1.5;
+}
+textarea.notion-notes[disabled] { opacity: .5; cursor: not-allowed; }
+.notion-db-row {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 11px 13px; border-radius: var(--r-sm);
+  border: 1px solid var(--hairline); background: var(--surface-2);
+  color: inherit; font: inherit; text-align: left; cursor: pointer;
+  transition: all .15s var(--ease);
+}
+.notion-db-row.is-active { border-color: rgba(255,217,102,.45); background: rgba(255,217,102,.05); }
+@media (hover: hover) and (pointer: fine) {
+  .notion-db-row:hover { border-color: rgba(255,217,102,.28); background: #1a1a20; }
+}
+.notion-db-row .pm-check { margin-left: auto; flex: none; color: var(--gold); opacity: 0; }
+.notion-db-row.is-active .pm-check { opacity: 1; }
 
 /* ── Control row (above the chart it scopes) ─────────────────────────────── */
 .controls {
@@ -986,6 +1011,30 @@ footer.legal code {
   </div>
   <div class="kpi-grid" id="kpiGrid"></div>
 
+  <!-- ── Notion Research ─────────────────────────────────────────────── -->
+  <div class="section-head">
+    <h2>Notion Research</h2>
+    <span class="hint" id="notionHint">Push this projection to a Notion page you can keep research notes on</span>
+    <span class="rule"></span>
+    <button id="btnNotionSettings" class="lock-btn" title="Choose which Notion database to sync into">Database</button>
+  </div>
+  <div class="card" id="notionCard">
+    <div class="card-body">
+      <div class="notion-row">
+        <button id="btnNotionSync" class="btn btn-primary" disabled>Sync to Notion</button>
+        <a id="btnNotionOpen" class="btn btn-ghost" target="_blank" rel="noopener" hidden>Open Notion Research</a>
+        <span class="notion-status" id="notionSyncStatus">Save this projection first — Notion sync needs a name to attach to.</span>
+      </div>
+      <div class="calc-field" style="margin-top:14px">
+        <label for="notionNotes">Research notes
+          <span style="text-transform:none;font-weight:400;color:var(--text-muted)">— synced to Notion automatically as you type</span>
+        </label>
+        <textarea id="notionNotes" class="calc-input notion-notes" rows="4" disabled
+          placeholder="Save this projection, then Sync to Notion once — after that, notes you write here keep themselves in sync."></textarea>
+      </div>
+    </div>
+  </div>
+
   <!-- ── Control row: scopes the chart below it ───────────────────────── -->
   <div class="controls">
     <div class="section-head" style="margin:0">
@@ -1297,6 +1346,22 @@ footer.legal code {
       <input id="importFile" type="file" accept="application/json" hidden>
       <button id="btnImport" class="btn btn-ghost" title="Load projections from a .json backup file">Import…</button>
       <button id="btnExport" class="btn btn-ghost" title="Download all saved projections as a .json backup file" style="margin-left:auto">Export all</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Notion database picker ────────────────────────────────────────────── -->
+<div id="notionModal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="notionModalTitle">
+  <div class="modal-card wide">
+    <div class="modal-head">
+      <h3 id="notionModalTitle">Notion database</h3>
+      <button class="modal-close" data-close-modal aria-label="Close">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-hint" id="notionModalStatus">Checking connection…</div>
+      <div id="notionDbList" class="project-list" style="margin-top:12px"></div>
     </div>
   </div>
 </div>
@@ -1696,6 +1761,7 @@ function saveAsNew(name) {
     id, name: name.trim() || "Untitled", ticker: company.ticker,
     company: { ...company }, assumptions: cloneAssumptions(), locked,
     netWorth: { ...nw }, netWorthLog: nwLog.map(e => ({ ...e })),
+    notion: { ...notionState }, notionNotes: notionNotesText,
     createdAt: now, updatedAt: now,
   };
   saveProjectsMap(map);
@@ -1714,6 +1780,7 @@ function saveOverActive() {
     ...existing, ticker: company.ticker,
     company: { ...company }, assumptions: cloneAssumptions(), locked,
     netWorth: { ...nw }, netWorthLog: nwLog.map(e => ({ ...e })),
+    notion: { ...notionState }, notionNotes: notionNotesText,
     updatedAt: Date.now(),
   };
   saveProjectsMap(map);
@@ -1730,6 +1797,9 @@ function loadProjectById(id) {
   locked = !!p.locked;
   nw = p.netWorth ? normalizeNW(p.netWorth) : { ...NW_DEFAULTS };
   nwLog = Array.isArray(p.netWorthLog) ? normalizeNWLog(p.netWorthLog) : [];
+  clearTimeout(notionNotesTimer);
+  notionState = notionNormalizeState(p.notion);
+  notionNotesText = typeof p.notionNotes === "string" ? p.notionNotes : "";
   if (p.assumptions) {
     for (const k of ["base", "bear", "bull"]) {
       if (!p.assumptions[k]) continue;
@@ -1747,6 +1817,7 @@ function loadProjectById(id) {
   markSource(dataSource);
   renderAll();
   clearLogForm();
+  renderNotionUI();
   persist();
   return true;
 }
@@ -1777,6 +1848,9 @@ function startNewProject() {
   locked = false;
   nw = { ...NW_DEFAULTS };
   nwLog = [];
+  clearTimeout(notionNotesTimer);
+  notionState = notionNormalizeState(null);
+  notionNotesText = "";
   dataSource = "manual";
   setActiveProject(null);
   document.getElementById("ticker").value = "";
@@ -1785,6 +1859,7 @@ function startNewProject() {
   markSource(dataSource);
   renderAll();
   clearLogForm();
+  renderNotionUI();
   markClean();
   persist();
   flashToast("New blank projection — enter Company Inputs to begin.");
@@ -1827,6 +1902,222 @@ function relTime(ts) {
   if (s < 86400) return Math.round(s / 3600) + " hr ago";
   const d = Math.round(s / 86400);
   return d === 1 ? "yesterday" : d < 30 ? d + " days ago" : new Date(ts).toLocaleDateString();
+}
+
+/* ══ Notion Research ══════════════════════════════════════════════════════
+   Sync requires a saved (named) projection — the bookkeeping below
+   (pageId/notesBlockId/dataBlockIds) is stored inside that saved project's
+   own record, exactly like netWorth/netWorthLog are, so switching projects
+   via Open shows each one's own Notion link, not a single shared one.
+   The bridge never sees this file's contents unencrypted-vs-not — the point
+   is simpler: NOTION_TOKEN lives only server-side, this file only ever
+   talks to our own /api/notion/* routes, same-origin, same as every other
+   bridge call. */
+function notionNormalizeState(raw) {
+  if (!raw || typeof raw !== "object") return { pageId: null, url: null, notesBlockId: null, dataBlockIds: [], lastSyncedAt: null };
+  return {
+    pageId: raw.pageId || null,
+    url: raw.url || null,
+    notesBlockId: raw.notesBlockId || null,
+    dataBlockIds: Array.isArray(raw.dataBlockIds) ? raw.dataBlockIds : [],
+    lastSyncedAt: isFinite(raw.lastSyncedAt) ? raw.lastSyncedAt : null,
+  };
+}
+let notionState = notionNormalizeState(null);
+let notionNotesText = "";
+let notionNotesTimer = null;
+let notionSyncing = false;
+
+/* Writes only the Notion bookkeeping into the active saved project's record
+   — never company/assumptions/etc, so a Notion sync or a notes autosave can
+   never silently overwrite unsaved edits sitting in that record waiting on
+   an explicit Save. */
+function persistNotionToActiveProject() {
+  if (!currentProjectId) return;
+  const map = loadProjects();
+  const p = map[currentProjectId];
+  if (!p) return;
+  p.notion = { ...notionState };
+  p.notionNotes = notionNotesText;
+  saveProjectsMap(map);
+  syncProjectToBridge(p);
+}
+
+function notionScenarioPayload(key) {
+  const r = results[key], a = assumptions[key];
+  return {
+    revGrowth: a.revGrowth, niGrowth: a.niGrowth, peLow: a.peLow, peHigh: a.peHigh,
+    revenue: r.revenue, netIncome: r.netIncome, eps: r.eps,
+    priceLow: r.priceLow, priceHigh: r.priceHigh,
+    cagrLow: r.cagrLow, cagrHigh: r.cagrHigh,
+  };
+}
+
+function renderNotionUI() {
+  const notesEl = document.getElementById("notionNotes");
+  if (notesEl) notesEl.value = notionNotesText;
+  updateNotionUI();
+}
+
+function updateNotionUI() {
+  const syncBtn = document.getElementById("btnNotionSync");
+  const openBtn = document.getElementById("btnNotionOpen");
+  const notesEl = document.getElementById("notionNotes");
+  const statusEl = document.getElementById("notionSyncStatus");
+  if (!syncBtn) return;
+  const hasProject = !!currentProjectId;
+
+  syncBtn.disabled = !hasProject || notionSyncing;
+  notesEl.disabled = !hasProject || !notionState.pageId;
+
+  if (notionState.pageId && notionState.url) {
+    openBtn.hidden = false;
+    openBtn.href = notionState.url;
+  } else {
+    openBtn.hidden = true;
+  }
+
+  if (!hasProject) {
+    statusEl.textContent = "Save this projection first — Notion sync needs a name to attach to.";
+    statusEl.className = "notion-status";
+  } else if (notionSyncing) {
+    statusEl.textContent = "Syncing…";
+    statusEl.className = "notion-status busy";
+  } else if (notionState.lastSyncedAt) {
+    statusEl.textContent = "Synced " + relTime(notionState.lastSyncedAt);
+    statusEl.className = "notion-status ok";
+  } else {
+    statusEl.textContent = "Not yet synced to Notion.";
+    statusEl.className = "notion-status";
+  }
+}
+
+async function notionSync() {
+  if (!currentProjectId) { flashToast("Save this projection first.", true); return; }
+  if (notionSyncing) return;
+  notionSyncing = true;
+  updateNotionUI();
+  try {
+    const res = await fetch(BRIDGE + "/api/notion/sync", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ticker: company.ticker,
+        notes: notionNotesText,
+        years: YEARS,
+        scenarios: { base: notionScenarioPayload("base"), bear: notionScenarioPayload("bear"), bull: notionScenarioPayload("bull") },
+        notion: notionState,
+      }),
+    });
+    const j = await res.json();
+    if (!res.ok || j.error) throw new Error(j.error || ("HTTP " + res.status));
+    notionState = notionNormalizeState(j.notion);
+    persistNotionToActiveProject();
+    flashToast("Synced to Notion.");
+  } catch (e) {
+    flashToast("Notion sync failed — " + String(e.message || e), true);
+  } finally {
+    notionSyncing = false;
+    updateNotionUI();
+  }
+}
+
+/* Debounced so a page isn't PATCHed on every keystroke; ~1.5s of pause (or
+   losing focus) is "done for now" without ever feeling like a save button
+   you have to remember to press. */
+function onNotionNotesInput() {
+  notionNotesText = document.getElementById("notionNotes").value;
+  persistNotionToActiveProject();
+  clearTimeout(notionNotesTimer);
+  if (!notionState.notesBlockId) return;   // nothing to sync to until the first full sync creates the page
+  const statusEl = document.getElementById("notionSyncStatus");
+  statusEl.textContent = "Typing…";
+  statusEl.className = "notion-status";
+  notionNotesTimer = setTimeout(notionPushNotes, 1500);
+}
+
+async function notionPushNotes() {
+  if (!notionState.notesBlockId) return;
+  const statusEl = document.getElementById("notionSyncStatus");
+  statusEl.textContent = "Saving notes to Notion…";
+  statusEl.className = "notion-status busy";
+  try {
+    const res = await fetch(BRIDGE + "/api/notion/notes", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ notion: notionState, notes: notionNotesText }),
+    });
+    const j = await res.json();
+    if (!res.ok || j.error) throw new Error(j.error || ("HTTP " + res.status));
+    statusEl.textContent = "Notes saved to Notion just now.";
+    statusEl.className = "notion-status ok";
+  } catch (e) {
+    statusEl.textContent = "Notes sync failed — will retry on your next edit.";
+    statusEl.className = "notion-status err";
+  }
+}
+
+/* ── Database picker modal ─────────────────────────────────────────────── */
+async function openNotionSettingsModal() {
+  openModalEl(notionModal);
+  const statusEl = document.getElementById("notionModalStatus");
+  const listEl = document.getElementById("notionDbList");
+  statusEl.textContent = "Checking connection…";
+  listEl.innerHTML = "";
+  try {
+    const res = await fetch(BRIDGE + "/api/notion/status");
+    const j = await res.json();
+    if (!j.configured) {
+      statusEl.textContent = "Notion isn't set up on the server yet — set NOTION_TOKEN and reload.";
+      return;
+    }
+    if (!j.connected) {
+      statusEl.textContent = "Can't reach Notion: " + (j.error || "unknown error");
+      return;
+    }
+    statusEl.textContent = j.database
+      ? `Connected${j.workspace ? " as " + escapeHtml(j.workspace) : ""} — currently syncing into "${escapeHtml(j.database.databaseName)}".`
+      : `Connected${j.workspace ? " as " + escapeHtml(j.workspace) : ""} — pick a database to sync into.`;
+    const dbRes = await fetch(BRIDGE + "/api/notion/databases");
+    const dbJson = await dbRes.json();
+    if (!dbRes.ok || dbJson.error) { statusEl.textContent = dbJson.error || "Couldn't list databases."; return; }
+    renderNotionDbList(dbJson.databases || [], j.database);
+  } catch (e) {
+    statusEl.textContent = "Couldn't reach the bridge to check Notion status.";
+  }
+}
+
+function renderNotionDbList(databases, current) {
+  const listEl = document.getElementById("notionDbList");
+  if (!databases.length) {
+    listEl.innerHTML = `<div class="project-empty">No databases are shared with this integration yet.<br>
+      In Notion: open a database → ••• menu → Connections → add your integration.</div>`;
+    return;
+  }
+  listEl.innerHTML = databases.map(db => `
+    <button type="button" class="notion-db-row${current && current.databaseId === db.id ? " is-active" : ""}"
+            data-db-id="${db.id}" data-db-name="${escapeHtml(db.name)}">
+      <span>${escapeHtml(db.name)}</span>
+      <svg class="pm-check" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <path d="M3 8.5 6.5 12 13 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </button>`).join("");
+  listEl.querySelectorAll(".notion-db-row").forEach(btn => {
+    btn.addEventListener("click", () => selectNotionDatabase(btn.dataset.dbId, btn.dataset.dbName));
+  });
+}
+
+async function selectNotionDatabase(id, name) {
+  try {
+    const res = await fetch(BRIDGE + "/api/notion/settings", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ databaseId: id, databaseName: name }),
+    });
+    const j = await res.json();
+    if (!res.ok || j.error) throw new Error(j.error || ("HTTP " + res.status));
+    flashToast(`Now syncing into "${name}".`);
+    closeModalEl(notionModal);
+  } catch (e) {
+    flashToast("Couldn't save that choice — " + String(e.message || e), true);
+  }
 }
 
 function exportAllProjects() {
@@ -3278,6 +3569,7 @@ function confirmSaveModal() {
   if (saveModalMode === "saveAs") {
     saveAsNew(name);
     updateProjectNameUI();
+    updateNotionUI();   // currentProjectId just went from null to real — Sync/notes were disabled until now
     flashToast(`Saved as "${name}".`);
   } else {
     renameProject(renameTargetId, name);
@@ -3371,6 +3663,12 @@ document.getElementById("importFile").addEventListener("change", (e) => {
 });
 
 document.getElementById("btnNew").addEventListener("click", startNewProject);
+
+/* ── Notion Research ────────────────────────────────────────────────────── */
+const notionModal = document.getElementById("notionModal");
+document.getElementById("btnNotionSettings").addEventListener("click", openNotionSettingsModal);
+document.getElementById("btnNotionSync").addEventListener("click", notionSync);
+document.getElementById("notionNotes").addEventListener("input", onNotionNotesInput);
 
 /* ── Save / rename entry points ────────────────────────────────────────── */
 document.getElementById("btnSave").addEventListener("click", () => {
@@ -3707,6 +4005,7 @@ if (!bootedFromProject) {
   applyLockUI();
   recompute();
   renderAll();
+  renderNotionUI();
   markClean();
   updateProjectNameUI();
 }

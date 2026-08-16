@@ -38,6 +38,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import openpyxl
 
+import notion_service
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 WORKBOOK = os.path.normpath(os.path.join(HERE, "..", "Financial_Projection_Model.xlsx"))
 SHEET = "Projection Model"
@@ -45,6 +47,12 @@ SHEET = "Projection Model"
 # bind it — local runs never set this, so the local default is untouched.
 PORT = int(os.environ.get("PORT", 8765))
 IS_CLOUD = "PORT" in os.environ
+
+# A Notion *internal* integration token (from notion.so/my-integrations) —
+# single-user, so this is one shared secret like BRIDGE_USERNAME/PASSWORD
+# below, not a per-account OAuth token. Never sent to the frontend; every
+# Notion call happens here on the server. Empty string = feature not set up.
+NOTION_TOKEN = os.environ.get("NOTION_TOKEN", "").strip()
 CREDENTIALS_FILE = os.path.join(HERE, ".bridge_credentials.json")
 
 
@@ -152,7 +160,7 @@ def _pg_connect():
 
 
 def pg_init():
-    """Create the table if needed. Returns (ok, error_message)."""
+    """Create the tables if needed. Returns (ok, error_message)."""
     global _pg_error
     try:
         with _pg_connect() as conn, conn.cursor() as cur:
@@ -161,6 +169,17 @@ def pg_init():
                     id         TEXT PRIMARY KEY,
                     data       TEXT NOT NULL,
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+            """)
+            # Single-row table — this bridge has one shared login, not
+            # per-user accounts, so there's exactly one Notion database
+            # connected at a time. See notion_settings_get/set below.
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS notion_settings (
+                    id            TEXT PRIMARY KEY DEFAULT 'default',
+                    database_id   TEXT NOT NULL,
+                    database_name TEXT NOT NULL,
+                    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
                 )
             """)
             conn.commit()
@@ -269,6 +288,61 @@ def delete_saved_project(project_id):
         return True
     except OSError:
         return False
+
+
+# ── Notion Research: which database this bridge syncs stock pages into ──────
+# Single row, same file/Postgres split as saved projections above — a local
+# JSON file when there's no NEON_DATABASE_URL, Postgres when there is.
+NOTION_SETTINGS_FILE = os.path.join(HERE, "notion_settings.json")
+
+
+def get_notion_settings():
+    """Returns {"databaseId", "databaseName"} or None if nothing's selected yet."""
+    if USE_PG:
+        try:
+            with _pg_connect() as conn, conn.cursor() as cur:
+                cur.execute("SELECT database_id, database_name FROM notion_settings WHERE id = 'default'")
+                row = cur.fetchone()
+            if not row:
+                return None
+            return {"databaseId": row[0], "databaseName": row[1]}
+        except Exception as exc:                                  # noqa: BLE001
+            print(f"[bridge] Postgres read (notion_settings) failed: {exc}", flush=True)
+            return None
+
+    try:
+        with open(NOTION_SETTINGS_FILE, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        if data.get("databaseId") and data.get("databaseName"):
+            return {"databaseId": data["databaseId"], "databaseName": data["databaseName"]}
+    except (OSError, json.JSONDecodeError):
+        pass
+    return None
+
+
+def set_notion_settings(database_id, database_name):
+    if USE_PG:
+        try:
+            with _pg_connect() as conn, conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO notion_settings (id, database_id, database_name, updated_at)
+                    VALUES ('default', %s, %s, now())
+                    ON CONFLICT (id) DO UPDATE
+                        SET database_id = EXCLUDED.database_id,
+                            database_name = EXCLUDED.database_name,
+                            updated_at = now()
+                """, (database_id, database_name))
+                conn.commit()
+            return True, None
+        except Exception as exc:                                  # noqa: BLE001
+            return False, f"Could not save to database: {exc}"
+
+    try:
+        with open(NOTION_SETTINGS_FILE, "w", encoding="utf-8") as fh:
+            json.dump({"databaseId": database_id, "databaseName": database_name}, fh, indent=2)
+        return True, None
+    except OSError as exc:
+        return False, f"Could not write settings file: {exc}"
 
 
 def read_company():
@@ -533,6 +607,126 @@ def refresh_chain(ticker, api_key):
     return {"error": " ".join(notes) or "Refresh failed."}, 502
 
 
+# ── Notion Research: turn a posted projection into Notion blocks ────────────
+# All the actual math (revenue/NI/EPS/CAGR/growth, etc.) happens client-side
+# in dashboard.html; this only formats numbers it already computed into
+# Notion's block JSON. Scenario shape mirrors computeScenario() there:
+# revenue/netIncome/eps/priceLow/priceHigh arrays (one entry per year), plus
+# cagrLow/cagrHigh and the revGrowth/niGrowth/peLow/peHigh assumption arrays.
+#
+# v1 deliberately has no "current price" field — nothing in this app fetches
+# a live quote today (Alpha Vantage is called here for fundamentals only), so
+# rather than fabricate a number this is left out until that's added.
+SCENARIO_LABELS = {"base": "Base Case", "bear": "Bear Case", "bull": "Bull Case"}
+
+
+def _fmt_money(v):
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return "—"
+    return f"{'-' if v < 0 else ''}${abs(v):,.0f}"
+
+
+def _fmt_dollars(v):
+    try:
+        return f"${float(v):.2f}"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def _fmt_pct(v):
+    try:
+        return f"{float(v) * 100:.1f}%"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def _fmt_x(v):
+    try:
+        return f"{float(v):.1f}x"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def _summarize_series(arr, fmt, suffix=""):
+    """A flat value shows as one number; a value that varies by year says so
+    instead of quietly picking one year and implying it's the whole story."""
+    vals = [v for v in (arr or []) if isinstance(v, (int, float))]
+    if not vals:
+        return "—"
+    lo, hi = min(vals), max(vals)
+    if abs(hi - lo) < 1e-9:
+        return f"{fmt(lo)}{suffix}"
+    return f"{fmt(lo)}–{fmt(hi)}{suffix} (varies by year)"
+
+
+def _table_block(headers, rows):
+    def cell(text):
+        return [{"type": "text", "text": {"content": str(text)[:180]}}]
+
+    table_rows = [{"object": "block", "type": "table_row",
+                   "table_row": {"cells": [cell(h) for h in headers]}}]
+    for row in rows:
+        table_rows.append({"object": "block", "type": "table_row",
+                            "table_row": {"cells": [cell(c) for c in row]}})
+    return {
+        "object": "block", "type": "table",
+        "table": {
+            "table_width": len(headers),
+            "has_column_header": True,
+            "has_row_header": True,
+            "children": table_rows,
+        },
+    }
+
+
+def build_projection_blocks(payload):
+    """payload: {"years": [...], "scenarios": {"base": {...}, "bear": {...}, "bull": {...}}}"""
+    years = payload.get("years") or []
+    scenarios = payload.get("scenarios") or {}
+    blocks = []
+
+    val_rows = []
+    for key in ("base", "bear", "bull"):
+        sc = scenarios.get(key) or {}
+        price_low = (sc.get("priceLow") or [None])[-1]
+        price_high = (sc.get("priceHigh") or [None])[-1]
+        val_rows.append([
+            SCENARIO_LABELS[key],
+            f"{_fmt_pct(sc.get('cagrLow'))} – {_fmt_pct(sc.get('cagrHigh'))}",
+            f"{_fmt_dollars(price_low)} – {_fmt_dollars(price_high)}",
+        ])
+    blocks.append(notion_service.heading_block("Implied Valuation"))
+    blocks.append(_table_block(
+        ["Scenario", "CAGR", f"{years[-1]} Price" if years else "Final-Year Price"], val_rows))
+
+    for key in ("base", "bear", "bull"):
+        sc = scenarios.get(key)
+        if not sc:
+            continue
+        blocks.append(notion_service.heading_block(SCENARIO_LABELS[key]))
+        headers = ["Metric"] + [str(y) for y in years]
+        rows = [
+            ["Revenue ($M)"] + [_fmt_money(v) for v in sc.get("revenue", [])],
+            ["Net Income ($M)"] + [_fmt_money(v) for v in sc.get("netIncome", [])],
+            ["EPS ($/sh)"] + [_fmt_dollars(v) for v in sc.get("eps", [])],
+            ["Share Price Low"] + [_fmt_dollars(v) for v in sc.get("priceLow", [])],
+            ["Share Price High"] + [_fmt_dollars(v) for v in sc.get("priceHigh", [])],
+        ]
+        blocks.append(_table_block(headers, rows))
+
+        assumptions_line = (
+            f"Revenue growth {_summarize_series(sc.get('revGrowth', [])[1:], _fmt_pct)} · "
+            f"Net income growth {_summarize_series(sc.get('niGrowth', [])[1:], _fmt_pct)} · "
+            f"P/E {_summarize_series(sc.get('peLow', []), _fmt_x)}"
+            f"–{_summarize_series(sc.get('peHigh', []), _fmt_x)}"
+        )
+        blocks.append(notion_service.paragraph_block(assumptions_line))
+
+    return blocks
+
+
 # ── HTTP layer ──────────────────────────────────────────────────────────────
 class Handler(BaseHTTPRequestHandler):
     server_version = "ProjectionBridge/1.0"
@@ -647,7 +841,41 @@ class Handler(BaseHTTPRequestHandler):
             self._json(list_saved_projects())
             return
 
+        if path == "/api/notion/status":
+            if not NOTION_TOKEN:
+                self._json({"configured": False, "connected": False, "workspace": None,
+                            "database": get_notion_settings(), "error": None})
+                return
+            ok, info = notion_service.check_token(NOTION_TOKEN)
+            self._json({
+                "configured": True,
+                "connected": ok,
+                "workspace": info.get("name") if ok else None,
+                "database": get_notion_settings(),
+                "error": None if ok else notion_service.error_message(info),
+            })
+            return
+
+        if path == "/api/notion/databases":
+            if not NOTION_TOKEN:
+                self._json({"error": "Notion isn't configured on the server yet."}, 400)
+                return
+            ok, data = notion_service.list_databases(NOTION_TOKEN)
+            if not ok:
+                self._notion_fail(data)
+                return
+            self._json({"databases": data})
+            return
+
         self._json({"error": "not found"}, 404)
+
+    def _notion_fail(self, err):
+        status = err.get("status") if isinstance(err, dict) else 0
+        # Pass real Notion HTTP statuses through as-is; anything else (a
+        # network failure, a status Notion doesn't normally send here) becomes
+        # a 502 — this bridge's fault for not reaching Notion, not the caller's.
+        http_status = status if status in (400, 401, 403, 404, 429) else 502
+        self._json({"error": notion_service.error_message(err)}, http_status)
 
     def _serve_static(self, filepath, content_type):
         try:
@@ -696,7 +924,126 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": True})
             return
 
+        if path == "/api/notion/settings":
+            if not NOTION_TOKEN:
+                self._json({"error": "Notion isn't configured on the server yet."}, 400)
+                return
+            payload = self._read_json_body()
+            db_id = str(payload.get("databaseId") or "").strip()
+            db_name = str(payload.get("databaseName") or "").strip()
+            if not db_id or not db_name:
+                self._json({"error": "Pick a database first."}, 400)
+                return
+            ok, err = set_notion_settings(db_id, db_name)
+            if not ok:
+                self._json({"error": err}, 500)
+                return
+            self._json({"ok": True})
+            return
+
+        if path == "/api/notion/sync":
+            self._handle_notion_sync()
+            return
+
+        if path == "/api/notion/notes":
+            if not NOTION_TOKEN:
+                self._json({"error": "Notion isn't configured on the server yet."}, 400)
+                return
+            payload = self._read_json_body()
+            notes_block_id = (payload.get("notion") or {}).get("notesBlockId")
+            if not notes_block_id:
+                self._json({"error": "Sync to Notion once first — after that, notes keep themselves in sync."}, 400)
+                return
+            ok, err = notion_service.update_notes(NOTION_TOKEN, notes_block_id, str(payload.get("notes") or ""))
+            if not ok:
+                self._notion_fail(err)
+                return
+            self._json({"ok": True, "lastSyncedAt": int(time.time() * 1000)})
+            return
+
         self._json({"error": "not found"}, 404)
+
+    def _handle_notion_sync(self):
+        if not NOTION_TOKEN:
+            self._json({"error": "Notion isn't configured on the server yet."}, 400)
+            return
+        settings = get_notion_settings()
+        if not settings:
+            self._json({"error": "Pick a Notion database first, in Notion Research settings."}, 400)
+            return
+        payload = self._read_json_body()
+        ticker = str(payload.get("ticker") or "").strip().upper()
+        if not ticker:
+            self._json({"error": "No ticker to sync — enter Company Inputs first."}, 400)
+            return
+        notes = str(payload.get("notes") or "")
+        existing = payload.get("notion") or {}
+        database_id = settings["databaseId"]
+
+        ok, title_prop = notion_service.get_database_title_property(NOTION_TOKEN, database_id)
+        if not ok:
+            self._notion_fail(title_prop)
+            return
+
+        data_blocks = build_projection_blocks(payload)
+        synced_label = time.strftime("%b %d, %Y %H:%M UTC", time.gmtime())
+
+        page_id = existing.get("pageId")
+        # Only trust existing.notesBlockId/dataBlockIds when page_id itself
+        # is confirmed valid below — they were captured against that exact
+        # page, and mean nothing (or worse, point at some other page's
+        # blocks) the moment we have to fall back to a different page.
+        page_verified = False
+        if page_id:
+            # A page id we tracked before doesn't mean it still exists — the
+            # user (or someone else in the workspace) may have deleted it.
+            ok, _ = notion_service.get_page(NOTION_TOKEN, page_id)
+            page_verified = ok
+            if not ok:
+                page_id = None
+
+        if not page_id:
+            # Might already exist from an earlier sync this record didn't
+            # track, or a page made by hand — reuse it rather than create a
+            # second page for the same ticker.
+            ok, found = notion_service.find_page_by_ticker(NOTION_TOKEN, database_id, title_prop, ticker)
+            if not ok:
+                self._notion_fail(found)
+                return
+            page_id = found["id"] if found else None
+
+        if not page_id:
+            ok, result = notion_service.create_stock_page(
+                NOTION_TOKEN, database_id, title_prop, ticker, notes, data_blocks, synced_label)
+            if not ok:
+                self._notion_fail(result)
+                return
+            result["lastSyncedAt"] = int(time.time() * 1000)
+            self._json({"ok": True, "notion": result})
+            return
+
+        notes_block_id = existing.get("notesBlockId") if page_verified else None
+        if not notes_block_id:
+            ok, notes_block_id = notion_service.append_notes_zone(NOTION_TOKEN, page_id, notes)
+            if not ok:
+                self._notion_fail(notes_block_id)
+                return
+
+        old_data_ids = (existing.get("dataBlockIds") or []) if page_verified else []
+        ok, new_ids = notion_service.replace_data_section(
+            NOTION_TOKEN, page_id, old_data_ids, data_blocks, synced_label)
+        if not ok:
+            self._notion_fail(new_ids)
+            return
+        ok, page = notion_service.get_page(NOTION_TOKEN, page_id)
+        url = page.get("url") if ok else f"https://notion.so/{page_id.replace('-', '')}"
+        self._json({"ok": True, "notion": {
+            "pageId": page_id,
+            "url": url,
+            "notesBlockId": notes_block_id,
+            "dataBlockIds": new_ids,
+            "lastSyncedAt": int(time.time() * 1000),
+        }})
 
     def do_DELETE(self):                                         # noqa: N802
         if not self._authorized():
@@ -773,6 +1120,12 @@ def main():
         print("             set NEON_DATABASE_URL to keep them and sync across devices.")
     else:
         print(f"  saves    : {SAVES_DIR}")
+
+    if NOTION_TOKEN:
+        settings = get_notion_settings()
+        print("  notion   : token set" + (f" — syncing to \"{settings['databaseName']}\"" if settings else " — no database selected yet"))
+    else:
+        print("  notion   : not configured — set NOTION_TOKEN to enable Notion Research")
 
     url = f"http://127.0.0.1:{PORT}/"
     print(f"  serving  : {url}" if not IS_CLOUD else f"  serving  : 0.0.0.0:{PORT}")

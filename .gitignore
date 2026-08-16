@@ -1,6 +1,7 @@
 # Local-only — never commit credentials or personal saved data.
 .bridge_credentials.json
 saves/
+notion_settings.json
 __pycache__/
 *.pyc
 .app-profile/
