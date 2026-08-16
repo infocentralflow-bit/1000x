@@ -3213,9 +3213,20 @@ function showWatchlistTooltip(i, points, X, Y) {
   const rect = svg.getBoundingClientRect();
   const scale = rect.width / 640;
   const cx = X(i) * scale;
-  const left = Math.min(Math.max(cx + 16, 8), rect.width - tip.offsetWidth - 8);
+  const cy = Y(p.close) * scale;
+  const tipW = tip.offsetWidth || 178;
+  const tipH = tip.offsetHeight || 64;
+
+  const left = Math.min(Math.max(cx + 16, 8), rect.width - tipW - 8);
+  // Sit below the hovered point when it's in the chart's top half, above it
+  // when it's in the bottom half — keeps the tooltip from covering the line
+  // right where you're pointing.
+  const top = cy < rect.height / 2
+    ? Math.min(cy + 16, rect.height - tipH - 8)
+    : Math.max(cy - tipH - 16, 8);
+
   tip.style.left = left + "px";
-  tip.style.top = "8px";
+  tip.style.top = top + "px";
 }
 
 function hideWatchlistTooltip() {
