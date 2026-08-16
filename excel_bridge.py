@@ -23,6 +23,7 @@ Run:  python excel_bridge.py            (or double-click run_dashboard.bat)
 """
 
 import base64
+import hashlib
 import hmac
 import json
 import os
@@ -90,6 +91,40 @@ def load_or_create_credentials():
 AUTH_USER, AUTH_PASS = load_or_create_credentials()
 AUTH_TOKEN = base64.b64encode(f"{AUTH_USER}:{AUTH_PASS}".encode()).decode()
 AUTH_ENABLED = "--no-auth" not in sys.argv[1:]
+
+# ── sessions ─────────────────────────────────────────────────────────────────
+# The browser's native Basic Auth prompt works but looks nothing like an app —
+# this backs a real login page (login.html) with a signed, HttpOnly session
+# cookie instead. Basic Auth is still accepted too, so a curl/script flow that
+# already knows AUTH_USER/AUTH_PASS keeps working unchanged.
+# Deriving the signing key from AUTH_TOKEN (rather than a fresh random secret)
+# means sessions survive a process restart on the same credentials, but every
+# outstanding session is invalidated the moment the password changes.
+SESSION_COOKIE = "bridge_session"
+SESSION_MAX_AGE = 30 * 24 * 3600  # 30 days — a single-user personal dashboard
+SESSION_KEY = hashlib.sha256(f"bridge-session-key:{AUTH_TOKEN}".encode()).digest()
+
+
+def _sign_session(payload):
+    return hmac.new(SESSION_KEY, payload.encode(), hashlib.sha256).hexdigest()
+
+
+def make_session_token():
+    expiry = int(time.time()) + SESSION_MAX_AGE
+    payload = f"{AUTH_USER}:{expiry}"
+    return base64.urlsafe_b64encode(f"{payload}:{_sign_session(payload)}".encode()).decode()
+
+
+def verify_session_token(token):
+    try:
+        user, expiry, sig = base64.urlsafe_b64decode(token.encode()).decode().rsplit(":", 2)
+    except Exception:                                              # noqa: BLE001
+        return False
+    if not hmac.compare_digest(sig, _sign_session(f"{user}:{expiry}")):
+        return False
+    if not hmac.compare_digest(user, AUTH_USER):
+        return False
+    return int(expiry) >= int(time.time())
 
 # Cell addresses of the Company Inputs block. These mirror the workbook's
 # defined names (Ticker / ApiKey / Co_Revenue / Co_NetIncome / Co_EPS /
@@ -813,14 +848,23 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 
-    def _json(self, obj, status=200):
+    def _json(self, obj, status=200, set_cookie=None):
         body = json.dumps(obj).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        if set_cookie:
+            self.send_header("Set-Cookie", set_cookie)
         self._cors()
         self.end_headers()
         self.wfile.write(body)
+
+    def _redirect(self, location):
+        self.send_response(302)
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self._cors()
+        self.end_headers()
 
     def do_OPTIONS(self):                                        # noqa: N802
         # Preflight requests never carry credentials — don't gate them, or
@@ -841,6 +885,12 @@ class Handler(BaseHTTPRequestHandler):
     def _authorized(self):
         if not AUTH_ENABLED:
             return True
+        for crumb in self.headers.get("Cookie", "").split(";"):
+            name, _, value = crumb.strip().partition("=")
+            if name == SESSION_COOKIE and verify_session_token(value):
+                return True
+        # Basic Auth stays accepted alongside the session cookie — scripts and
+        # curl already using AUTH_USER/AUTH_PASS this way don't have to change.
         header = self.headers.get("Authorization", "")
         if not header.startswith("Basic "):
             return False
@@ -849,20 +899,41 @@ class Handler(BaseHTTPRequestHandler):
         return hmac.compare_digest(header[6:], AUTH_TOKEN)
 
     def _require_auth(self):
-        body = b"Authentication required."
-        self.send_response(401)
-        self.send_header("WWW-Authenticate", 'Basic realm="Projection Model"')
-        self.send_header("Content-Type", "text/plain; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self._cors()
-        self.end_headers()
-        self.wfile.write(body)
+        # No WWW-Authenticate header — that's what makes the browser pop its
+        # ugly native Basic Auth dialog. API callers just get a plain 401;
+        # do_GET sends page requests to /login instead, before this is hit.
+        self._json({"error": "Authentication required.", "loginUrl": "/login"}, 401)
 
     def do_GET(self):                                            # noqa: N802
-        if not self._authorized():
-            self._require_auth()
-            return
         path = urllib.parse.urlparse(self.path).path
+
+        # The login page has to be reachable before a session exists — it's
+        # the only route excluded from the auth check below.
+        if path == "/login":
+            if self._authorized():
+                self._redirect("/")
+                return
+            fp = os.path.join(HERE, "login.html")
+            try:
+                with open(fp, "rb") as fh:
+                    body = fh.read()
+            except OSError:
+                self._json({"error": "login.html missing"}, 404)
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        if not self._authorized():
+            if path in ("/", "/index.html", "/dashboard.html"):
+                self._redirect("/login")
+            else:
+                self._require_auth()
+            return
 
         if path in ("/", "/index.html", "/dashboard.html"):
             fp = os.path.join(HERE, "dashboard.html")
@@ -903,7 +974,8 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/health":
             self._json({"ok": True, "workbook": WORKBOOK,
-                        "workbookExists": os.path.exists(WORKBOOK)})
+                        "workbookExists": os.path.exists(WORKBOOK),
+                        "authEnabled": AUTH_ENABLED})
             return
 
         if path == "/api/model":
@@ -996,10 +1068,30 @@ class Handler(BaseHTTPRequestHandler):
             return {}
 
     def do_POST(self):                                           # noqa: N802
+        path = urllib.parse.urlparse(self.path).path
+
+        if path == "/api/login":
+            payload = self._read_json_body()
+            user = str(payload.get("username") or "")
+            pw = str(payload.get("password") or "")
+            if hmac.compare_digest(user, AUTH_USER) and hmac.compare_digest(pw, AUTH_PASS):
+                cookie = (
+                    f"{SESSION_COOKIE}={make_session_token()}; Path=/; HttpOnly; "
+                    f"SameSite=Lax; Max-Age={SESSION_MAX_AGE}" + ("; Secure" if IS_CLOUD else "")
+                )
+                self._json({"ok": True}, set_cookie=cookie)
+            else:
+                self._json({"error": "Incorrect username or password."}, 401)
+            return
+
+        if path == "/api/logout":
+            cookie = f"{SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"
+            self._json({"ok": True}, set_cookie=cookie)
+            return
+
         if not self._authorized():
             self._require_auth()
             return
-        path = urllib.parse.urlparse(self.path).path
 
         if path == "/api/refresh":
             payload = self._read_json_body()
@@ -1211,7 +1303,7 @@ def main():
     print(f"  workbook : {WORKBOOK}")
     print(f"  exists   : {os.path.exists(WORKBOOK)}")
     if AUTH_ENABLED:
-        print(f"  login    : {AUTH_USER} / {AUTH_PASS}")
+        print(f"  login    : {AUTH_USER} / {AUTH_PASS}  (enter these on the /login page)")
         if not (os.environ.get("BRIDGE_USERNAME") and os.environ.get("BRIDGE_PASSWORD")):
             print(f"             (saved in .bridge_credentials.json — delete it for a new password)")
     else:

@@ -168,9 +168,10 @@ from anywhere, so it's now protected with a username/password (see below) — a 
    `https://something.ngrok-free.app` URL — **use the `https://` one**, not `http://`, so
    your password isn't sent in the clear.
 
-4. Open that URL on your phone. Your browser will show its normal login prompt — enter
-   the username/password from step 1. After that it behaves like the LAN version, startup
-   data load included, from anywhere with signal.
+4. Open that URL on your phone. You'll land on the app's own sign-in page — enter the
+   username/password from step 1 there (a "Sign out" icon in the header brings it back).
+   After that it behaves like the LAN version, startup data load included, from anywhere
+   with signal.
 
 The free ngrok URL changes every time you restart the tunnel, and the tunnel only exists
 while `start_tunnel.bat` is running — closing it takes the app off the public internet
@@ -206,6 +207,7 @@ most vivid red/green combinations in this lightness band do.
 | File | |
 |---|---|
 | `dashboard.html` | The whole app — no build step, no dependencies, works offline |
+| `login.html` | Sign-in page shown in front of the dashboard when a password is set |
 | `excel_bridge.py` | Local server: reads the workbook, drives Excel, calls the API, hosts saved-projection files |
 | `notion_service.py` | Notion API client used by the Notion Research feature |
 | `quotes_service.py` | yfinance wrapper used by the watchlist strip |
