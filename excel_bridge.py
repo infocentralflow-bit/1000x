@@ -950,15 +950,18 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "Notion isn't configured on the server yet."}, 400)
                 return
             payload = self._read_json_body()
-            notes_block_id = (payload.get("notion") or {}).get("notesBlockId")
-            if not notes_block_id:
+            notion_state = payload.get("notion") or {}
+            page_id = notion_state.get("pageId")
+            if not page_id:
                 self._json({"error": "Sync to Notion once first — after that, notes keep themselves in sync."}, 400)
                 return
-            ok, err = notion_service.update_notes(NOTION_TOKEN, notes_block_id, str(payload.get("notes") or ""))
+            ok, new_ids = notion_service.replace_notes_zone(
+                NOTION_TOKEN, page_id, notion_state.get("notesHeadingId"),
+                notion_state.get("notesBlockIds") or [], str(payload.get("notes") or ""))
             if not ok:
-                self._notion_fail(err)
+                self._notion_fail(new_ids)
                 return
-            self._json({"ok": True, "lastSyncedAt": int(time.time() * 1000)})
+            self._json({"ok": True, "notesBlockIds": new_ids, "lastSyncedAt": int(time.time() * 1000)})
             return
 
         self._json({"error": "not found"}, 404)
@@ -1022,12 +1025,15 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": True, "notion": result})
             return
 
-        notes_block_id = existing.get("notesBlockId") if page_verified else None
-        if not notes_block_id:
-            ok, notes_block_id = notion_service.append_notes_zone(NOTION_TOKEN, page_id, notes)
+        notes_heading_id = existing.get("notesHeadingId") if page_verified else None
+        notes_block_ids = (existing.get("notesBlockIds") or []) if page_verified else []
+        if not notes_heading_id:
+            ok, notes_zone = notion_service.append_notes_zone(NOTION_TOKEN, page_id, notes)
             if not ok:
-                self._notion_fail(notes_block_id)
+                self._notion_fail(notes_zone)
                 return
+            notes_heading_id = notes_zone["notesHeadingId"]
+            notes_block_ids = notes_zone["notesBlockIds"]
 
         old_data_ids = (existing.get("dataBlockIds") or []) if page_verified else []
         ok, new_ids = notion_service.replace_data_section(
@@ -1040,7 +1046,8 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"ok": True, "notion": {
             "pageId": page_id,
             "url": url,
-            "notesBlockId": notes_block_id,
+            "notesHeadingId": notes_heading_id,
+            "notesBlockIds": notes_block_ids,
             "dataBlockIds": new_ids,
             "lastSyncedAt": int(time.time() * 1000),
         }})

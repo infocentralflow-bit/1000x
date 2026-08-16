@@ -11,19 +11,23 @@ A Notion research page has two independently-updatable zones, so a
 background notes autosave and an explicit "Sync to Notion" (numbers) can
 never clobber each other:
 
-    [Heading2] Notes
-    [Paragraph] <your notes>          <- notesBlockId: PATCHed in place
+    [Heading2] Notes                   <- notesHeadingId: stable, never replaced
+    [...blocks...]                     <- notesBlockIds: deleted + re-appended
     [Divider]
     [Heading2] Projection Data — synced <timestamp>
-    [...blocks...]                    <- dataBlockIds: deleted + re-appended
+    [...blocks...]                     <- dataBlockIds: deleted + re-appended
 
-Both block IDs are handed back to the caller (excel_bridge.py) to persist
+Notes content is parsed from lightweight markdown (typed in a plain
+<textarea> — see markdown_to_blocks) so a research note can use real Notion
+headings/bullets/bold instead of landing as one flat paragraph. Every
+block ID above is handed back to the caller (excel_bridge.py) to persist
 alongside the saved projection that owns them; this module holds no state
 of its own.
 """
 
 import json
 import os
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -119,8 +123,119 @@ def divider_block():
     return {"object": "block", "type": "divider", "divider": {}}
 
 
-def _notes_zone(notes_text):
-    return [heading_block("Notes"), paragraph_block(notes_text)]
+# ── notes: lightweight markdown -> Notion blocks ─────────────────────────────
+# The dashboard's notes field is a plain <textarea> (no rich-text editor to
+# ship), so this is what actually makes a typed note "look organized" once
+# it lands in Notion — line-start markers become real block types, and a
+# small set of inline markers become rich-text annotations within any of them.
+_INLINE_RE = re.compile(
+    r"\*\*(?P<bold>.+?)\*\*"
+    r"|`(?P<code>.+?)`"
+    r"|\*(?P<italic>.+?)\*"
+    r"|\[(?P<link_text>.+?)\]\((?P<link_url>[^\s()]+)\)"
+)
+
+
+def _parse_inline(text):
+    """**bold**, `code`, *italic*, [text](url) -> Notion rich_text spans."""
+    spans, pos = [], 0
+    for m in _INLINE_RE.finditer(text):
+        if m.start() > pos:
+            spans.append({"type": "text", "text": {"content": text[pos:m.start()]}})
+        if m.group("bold") is not None:
+            spans.append({"type": "text", "text": {"content": m.group("bold")}, "annotations": {"bold": True}})
+        elif m.group("code") is not None:
+            spans.append({"type": "text", "text": {"content": m.group("code")}, "annotations": {"code": True}})
+        elif m.group("italic") is not None:
+            spans.append({"type": "text", "text": {"content": m.group("italic")}, "annotations": {"italic": True}})
+        else:
+            spans.append({"type": "text", "text": {"content": m.group("link_text"), "link": {"url": m.group("link_url")}}})
+        pos = m.end()
+    if pos < len(text):
+        spans.append({"type": "text", "text": {"content": text[pos:]}})
+    if not spans:
+        spans = [{"type": "text", "text": {"content": ""}}]
+    for s in spans:
+        s["text"]["content"] = s["text"]["content"][:2000]
+    return spans
+
+
+_HEADING_RE = re.compile(r"^(#{1,3})\s+(.*)$")
+_TODO_RE = re.compile(r"^[-*]\s+\[( |x|X)\]\s+(.*)$")
+_BULLET_RE = re.compile(r"^[-*]\s+(.*)$")
+_NUMBERED_RE = re.compile(r"^\d+[.)]\s+(.*)$")
+_QUOTE_RE = re.compile(r"^>\s?(.*)$")
+
+
+def markdown_to_blocks(text):
+    """Line-start markers -> block type: '# '/'## '/'### ' headings, '- '/'* '
+    bullets, '1. ' numbered items, '- [ ] '/'- [x] ' to-dos, '> ' quotes,
+    '---' dividers. Blank-line-separated runs of plain text become separate
+    paragraphs. Never returns an empty list — Notion pages need >=1 child."""
+    if not text or not text.strip():
+        return [paragraph_block("")]
+
+    blocks = []
+    paragraph_buf = []
+
+    def flush_paragraph():
+        if not paragraph_buf:
+            return
+        content = " ".join(paragraph_buf).strip()
+        if content:
+            blocks.append({"object": "block", "type": "paragraph", "paragraph": {"rich_text": _parse_inline(content)}})
+        paragraph_buf.clear()
+
+    for raw_line in text.replace("\r\n", "\n").split("\n"):
+        stripped = raw_line.strip()
+
+        if not stripped:
+            flush_paragraph()
+            continue
+
+        m = _HEADING_RE.match(stripped)
+        if m:
+            flush_paragraph()
+            key = f"heading_{len(m.group(1))}"
+            blocks.append({"object": "block", "type": key, key: {"rich_text": _parse_inline(m.group(2))}})
+            continue
+
+        if stripped in ("---", "***"):
+            flush_paragraph()
+            blocks.append(divider_block())
+            continue
+
+        m = _TODO_RE.match(stripped)
+        if m:
+            flush_paragraph()
+            blocks.append({"object": "block", "type": "to_do",
+                            "to_do": {"rich_text": _parse_inline(m.group(2)), "checked": m.group(1).lower() == "x"}})
+            continue
+
+        m = _BULLET_RE.match(stripped)
+        if m:
+            flush_paragraph()
+            blocks.append({"object": "block", "type": "bulleted_list_item",
+                            "bulleted_list_item": {"rich_text": _parse_inline(m.group(1))}})
+            continue
+
+        m = _NUMBERED_RE.match(stripped)
+        if m:
+            flush_paragraph()
+            blocks.append({"object": "block", "type": "numbered_list_item",
+                            "numbered_list_item": {"rich_text": _parse_inline(m.group(1))}})
+            continue
+
+        m = _QUOTE_RE.match(stripped)
+        if m:
+            flush_paragraph()
+            blocks.append({"object": "block", "type": "quote", "quote": {"rich_text": _parse_inline(m.group(1))}})
+            continue
+
+        paragraph_buf.append(stripped)
+
+    flush_paragraph()
+    return blocks or [paragraph_block("")]
 
 
 # ── page lookup / creation ───────────────────────────────────────────────────
@@ -148,22 +263,28 @@ def _list_children(token, block_id):
 
 def append_notes_zone(token, page_id, notes_text):
     """For a page this integration didn't create (found by ticker but never
-    tracked) — adds a Notes heading+paragraph at the end and hands back the
-    paragraph's block id so future notes autosaves can target it directly."""
+    tracked) — adds a Notes heading + parsed content at the end and hands
+    back the heading id (stable) and content block ids (replaced on every
+    later notes autosave) so future edits can target this page directly."""
     ok, result = _request(token, "PATCH", f"/blocks/{page_id}/children", {
-        "children": _notes_zone(notes_text),
+        "children": [heading_block("Notes"), *markdown_to_blocks(notes_text)],
     })
     if not ok:
         return False, result
     kids = result.get("results", [])
-    return True, (kids[1]["id"] if len(kids) > 1 else None)
+    return True, {
+        "notesHeadingId": kids[0]["id"] if kids else None,
+        "notesBlockIds": [b["id"] for b in kids[1:]] if len(kids) > 1 else [],
+    }
 
 
 def create_stock_page(token, database_id, title_prop, ticker, notes_text, data_blocks, synced_label):
-    """First-ever sync for this ticker. Returns page id/url plus the two
-    tracked block ids, read back from the created page's children."""
+    """First-ever sync for this ticker. Returns page id/url plus the tracked
+    block ids, read back from the created page's children."""
+    notes_content = markdown_to_blocks(notes_text)
     children = [
-        *_notes_zone(notes_text),
+        heading_block("Notes"),
+        *notes_content,
         divider_block(),
         heading_block(f"Projection Data — {synced_label}"),
         *data_blocks,
@@ -181,24 +302,27 @@ def create_stock_page(token, database_id, title_prop, ticker, notes_text, data_b
         # Page exists but we couldn't read back block ids for future targeted
         # updates — not fatal, the next full sync just rebuilds from scratch.
         kids = []
-    notes_block_id = kids[1]["id"] if len(kids) > 1 else None
-    # Includes the "Projection Data — <timestamp>" heading itself (kids[3])
-    # so replace_data_section() below deletes and recreates that heading too
-    # on every sync — otherwise the old heading (with a stale timestamp)
-    # would never be tracked and would sit there forever, one more of them
-    # piling up on the page after every single re-sync.
-    data_block_ids = [b["id"] for b in kids[3:]] if len(kids) > 3 else []
+    n = len(notes_content)
+    notes_heading_id = kids[0]["id"] if kids else None
+    notes_block_ids = [b["id"] for b in kids[1:1 + n]] if len(kids) > 1 else []
+    # dataBlockIds includes the "Projection Data — <timestamp>" heading
+    # itself (index 1+n+1, right after the divider) so replace_data_section()
+    # below deletes and recreates that heading too on every sync — otherwise
+    # the old heading (with a stale timestamp) would never be tracked and
+    # would sit there forever, one more of them piling up on every re-sync.
+    data_block_ids = [b["id"] for b in kids[1 + n + 1:]] if len(kids) > 1 + n + 1 else []
     return True, {
         "pageId": page["id"],
         "url": page.get("url") or f"https://notion.so/{page['id'].replace('-', '')}",
-        "notesBlockId": notes_block_id,
+        "notesHeadingId": notes_heading_id,
+        "notesBlockIds": notes_block_ids,
         "dataBlockIds": data_block_ids,
     }
 
 
 def replace_data_section(token, page_id, old_block_ids, data_blocks, synced_label):
     """Wholesale-replace the Projection Data blocks, leaving the Notes zone
-    (heading, paragraph, divider) and everything above them untouched."""
+    (heading, content, divider) and everything above them untouched."""
     for block_id in old_block_ids or []:
         # Best-effort — a block the user already deleted by hand is fine to skip.
         _request(token, "DELETE", f"/blocks/{block_id}")
@@ -215,10 +339,22 @@ def replace_data_section(token, page_id, old_block_ids, data_blocks, synced_labe
     return True, new_ids
 
 
-def update_notes(token, notes_block_id, notes_text):
-    return _request(token, "PATCH", f"/blocks/{notes_block_id}", {
-        "paragraph": {"rich_text": _rich_text(notes_text)},
-    })
+def replace_notes_zone(token, page_id, notes_heading_id, old_block_ids, notes_text):
+    """Wholesale-replace the Notes content (everything parsed from the typed
+    markdown), leaving the "Notes" heading itself and the Projection Data
+    section untouched — same delete-then-append pattern as the data section,
+    just re-inserted right after the heading via `after` instead of at the
+    very end of the page."""
+    for block_id in old_block_ids or []:
+        _request(token, "DELETE", f"/blocks/{block_id}")
+
+    body = {"children": markdown_to_blocks(notes_text)}
+    if notes_heading_id:
+        body["after"] = notes_heading_id
+    ok, result = _request(token, "PATCH", f"/blocks/{page_id}/children", body)
+    if not ok:
+        return False, result
+    return True, [b["id"] for b in result.get("results", [])]
 
 
 def error_message(err):

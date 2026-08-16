@@ -802,6 +802,10 @@ footer.legal code {
   .calc-input:hover { border-color: rgba(255,255,255,.18); }
 }
 .calc-hint { margin-top: 6px; font-size: 11px; color: var(--text-muted); }
+.calc-hint code {
+  background: var(--surface-2); padding: 1px 5px; border-radius: 4px;
+  font-size: 10.5px; color: #cfcec6;
+}
 .calc-actions { display: flex; gap: 10px; margin-top: 18px; }
 .calc-actions .btn { flex: 1; }
 
@@ -1031,6 +1035,9 @@ footer.legal code {
         </label>
         <textarea id="notionNotes" class="calc-input notion-notes" rows="4" disabled
           placeholder="Save this projection, then Sync to Notion once — after that, notes you write here keep themselves in sync."></textarea>
+        <div class="calc-hint">Formats in Notion: <code># heading</code>, <code>- bullet</code>, <code>1. numbered</code>,
+          <code>- [ ] to-do</code>, <code>&gt; quote</code>, <code>---</code> divider, <code>**bold**</code>, <code>*italic*</code>,
+          <code>`code`</code>, <code>[text](url)</code>.</div>
       </div>
     </div>
   </div>
@@ -1906,19 +1913,25 @@ function relTime(ts) {
 
 /* ══ Notion Research ══════════════════════════════════════════════════════
    Sync requires a saved (named) projection — the bookkeeping below
-   (pageId/notesBlockId/dataBlockIds) is stored inside that saved project's
-   own record, exactly like netWorth/netWorthLog are, so switching projects
-   via Open shows each one's own Notion link, not a single shared one.
+   (pageId/notesHeadingId/notesBlockIds/dataBlockIds) is stored inside that
+   saved project's own record, exactly like netWorth/netWorthLog are, so
+   switching projects via Open shows each one's own Notion link, not a
+   single shared one.
    The bridge never sees this file's contents unencrypted-vs-not — the point
    is simpler: NOTION_TOKEN lives only server-side, this file only ever
    talks to our own /api/notion/* routes, same-origin, same as every other
-   bridge call. */
+   bridge call.
+   Notes are typed as plain text but parsed server-side as lightweight
+   markdown (# heading, - bullet, 1. numbered, - [ ] to-do, > quote, ---
+   divider, **bold**, *italic*, `code`, [text](url)) so a note actually
+   looks organized once it lands in Notion, instead of one flat paragraph. */
 function notionNormalizeState(raw) {
-  if (!raw || typeof raw !== "object") return { pageId: null, url: null, notesBlockId: null, dataBlockIds: [], lastSyncedAt: null };
+  if (!raw || typeof raw !== "object") return { pageId: null, url: null, notesHeadingId: null, notesBlockIds: [], dataBlockIds: [], lastSyncedAt: null };
   return {
     pageId: raw.pageId || null,
     url: raw.url || null,
-    notesBlockId: raw.notesBlockId || null,
+    notesHeadingId: raw.notesHeadingId || null,
+    notesBlockIds: Array.isArray(raw.notesBlockIds) ? raw.notesBlockIds : [],
     dataBlockIds: Array.isArray(raw.dataBlockIds) ? raw.dataBlockIds : [],
     lastSyncedAt: isFinite(raw.lastSyncedAt) ? raw.lastSyncedAt : null,
   };
@@ -2028,7 +2041,7 @@ function onNotionNotesInput() {
   notionNotesText = document.getElementById("notionNotes").value;
   persistNotionToActiveProject();
   clearTimeout(notionNotesTimer);
-  if (!notionState.notesBlockId) return;   // nothing to sync to until the first full sync creates the page
+  if (!notionState.pageId) return;   // nothing to sync to until the first full sync creates the page
   const statusEl = document.getElementById("notionSyncStatus");
   statusEl.textContent = "Typing…";
   statusEl.className = "notion-status";
@@ -2036,7 +2049,7 @@ function onNotionNotesInput() {
 }
 
 async function notionPushNotes() {
-  if (!notionState.notesBlockId) return;
+  if (!notionState.pageId) return;
   const statusEl = document.getElementById("notionSyncStatus");
   statusEl.textContent = "Saving notes to Notion…";
   statusEl.className = "notion-status busy";
@@ -2047,6 +2060,11 @@ async function notionPushNotes() {
     });
     const j = await res.json();
     if (!res.ok || j.error) throw new Error(j.error || ("HTTP " + res.status));
+    // The reply's block ids replace ours — the old ones were just deleted
+    // server-side, so hanging onto them would target blocks that no longer
+    // exist next time.
+    notionState.notesBlockIds = Array.isArray(j.notesBlockIds) ? j.notesBlockIds : notionState.notesBlockIds;
+    persistNotionToActiveProject();
     statusEl.textContent = "Notes saved to Notion just now.";
     statusEl.className = "notion-status ok";
   } catch (e) {
