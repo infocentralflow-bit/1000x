@@ -102,11 +102,31 @@ body {
 }
 .watchlist-bar[hidden] { display: none; }
 .watchlist-scroll {
-  display: flex; align-items: center; gap: 7px;
-  overflow-x: auto; scrollbar-width: none;
+  display: flex; align-items: center;
+  overflow: hidden;
   flex: 1; min-width: 0;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 20px, #000 calc(100% - 20px), transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 20px, #000 calc(100% - 20px), transparent);
 }
-.watchlist-scroll::-webkit-scrollbar { display: none; }
+.watchlist-track {
+  display: flex; align-items: center; gap: 7px;
+  flex: none; width: max-content;
+}
+.watchlist-track-scrolling {
+  animation: watchlist-marquee linear infinite;
+  animation-duration: var(--wl-duration, 40s);
+  will-change: transform;
+}
+.watchlist-scroll:hover .watchlist-track-scrolling { animation-play-state: paused; }
+@keyframes watchlist-marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .watchlist-track-scrolling { animation: none; }
+  .watchlist-scroll { overflow-x: auto; scrollbar-width: none; -webkit-mask-image: none; mask-image: none; }
+  .watchlist-scroll::-webkit-scrollbar { display: none; }
+}
 .watchlist-empty { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
 .watchlist-chip {
   display: inline-flex; align-items: center; gap: 8px; flex: none;
@@ -2831,14 +2851,31 @@ function watchlistChipHtml(ticker, q) {
     </div>`;
 }
 
+const WATCHLIST_SCROLL_SPEED = 34; // px/sec — a slow, readable ticker-tape crawl
+
 function renderWatchlist() {
   const scroll = document.getElementById("watchlistScroll");
   if (!watchlistTickers.length) {
     scroll.innerHTML = '<span class="watchlist-empty">No tickers yet — tap + to add one.</span>';
     return;
   }
-  scroll.innerHTML = watchlistTickers.map(t => watchlistChipHtml(t, watchlistQuoteMap[t])).join("");
+  const chipsHtml = watchlistTickers.map(t => watchlistChipHtml(t, watchlistQuoteMap[t])).join("");
+  scroll.innerHTML = `<div class="watchlist-track">${chipsHtml}</div>`;
+  const track = scroll.querySelector(".watchlist-track");
+  const singleWidth = track.scrollWidth;
+  // Only crawl when the chips don't already fit — otherwise leave it static.
+  if (singleWidth <= scroll.clientWidth) return;
+  track.insertAdjacentHTML("beforeend", chipsHtml); // duplicate for a seamless loop
+  track.classList.add("watchlist-track-scrolling");
+  track.style.setProperty("--wl-duration", (singleWidth / WATCHLIST_SCROLL_SPEED) + "s");
 }
+
+let watchlistResizeTimer = null;
+window.addEventListener("resize", () => {
+  if (!watchlistTickers.length) return;
+  clearTimeout(watchlistResizeTimer);
+  watchlistResizeTimer = setTimeout(renderWatchlist, 200);
+});
 
 function applyWatchlistResult(j) {
   watchlistTickers = j.tickers || [];
