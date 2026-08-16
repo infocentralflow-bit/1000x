@@ -3121,9 +3121,28 @@ document.getElementById("watchlistRangeRow").addEventListener("click", (ev) => {
 });
 
 const WATCHLIST_INTRADAY_RANGES = new Set(["1d", "5d"]);
+const WATCHLIST_LONG_RANGES = new Set(["1y", "ytd"]);
+
+// Short ranges: "Aug 14" — clear without needing the year. Long ranges (a
+// year of daily points would repeat "Aug 14" every few pixels): just the
+// month, "Aug" — reads like a normal stock chart's x-axis.
 function watchlistDateLabel(dateStr, range) {
   if (WATCHLIST_INTRADAY_RANGES.has(range)) return (dateStr.split(" ")[1] || dateStr).slice(0, 5);
-  return dateStr.slice(5); // "YYYY-MM-DD" -> "MM-DD"
+  const d = new Date(dateStr.split(" ")[0] + "T00:00:00");
+  return d.toLocaleDateString("en-US", WATCHLIST_LONG_RANGES.has(range)
+    ? { month: "short" } : { month: "short", day: "numeric" });
+}
+
+// Long ranges get one label per month (evenly spread, capped at 7) instead
+// of just start/middle/end, so the month names are actually useful as an axis.
+function watchlistAxisIndices(n, range) {
+  if (!WATCHLIST_LONG_RANGES.has(range) || n <= 1) {
+    return n > 1 ? [0, Math.floor((n - 1) / 2), n - 1] : [0];
+  }
+  const count = Math.min(7, n);
+  const idxs = [];
+  for (let k = 0; k < count; k++) idxs.push(Math.round((k * (n - 1)) / (count - 1)));
+  return [...new Set(idxs)];
 }
 function watchlistFullDateLabel(dateStr) {
   const [datePart, timePart] = dateStr.split(" ");
@@ -3157,12 +3176,16 @@ function renderWatchlistChart(points, range) {
   });
   svg.append(gGrid);
 
-  const idxs = points.length > 1 ? [0, Math.floor((points.length - 1) / 2), points.length - 1] : [0];
+  const idxs = watchlistAxisIndices(points.length, range);
+  let lastAxisLabel = null;
   idxs.forEach(i => {
+    const label = watchlistDateLabel(points[i].date, range);
+    if (label === lastAxisLabel) return; // e.g. two ticks landing in the same month
+    lastAxisLabel = label;
     const anchor = i === 0 ? "start" : i === points.length - 1 ? "end" : "middle";
     const t = el("text", { x: X(i), y: VBh - 6, "text-anchor": anchor,
       fill: "#78776f", "font-size": "10.5", "font-family": "inherit" });
-    t.textContent = watchlistDateLabel(points[i].date, range);
+    t.textContent = label;
     svg.append(t);
   });
 
