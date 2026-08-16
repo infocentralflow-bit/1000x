@@ -1080,6 +1080,14 @@ footer.legal code {
       <input id="ticker" class="input" value="AAPL" autocomplete="off" spellcheck="false" aria-label="Stock ticker">
     </div>
 
+    <button id="btnSignOut" class="icon-btn" title="Sign out" aria-label="Sign out" hidden>
+      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <path d="M6.5 2.5H3.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M10.5 5 13.5 8l-3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M13.5 8h-8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      </svg>
+    </button>
+
   </header>
 
   <div class="watchlist-bar" id="watchlistBar" hidden>
@@ -1569,6 +1577,7 @@ const assumptions = {
 
 let dataSource = "sample";   // sample | workbook | manual | api
 let bridgeUp = false;
+let authEnabled = false;
 let metric = "revenue";
 let hoverIdx = null;
 
@@ -2876,10 +2885,18 @@ const BRIDGE = location.protocol.startsWith("http") ? "" : "http://127.0.0.1:876
 async function probeBridge() {
   try {
     const r = await fetch(BRIDGE + "/api/health", { signal: AbortSignal.timeout(1200) });
+    const j = await r.json().catch(() => ({}));
     bridgeUp = r.ok;
-  } catch { bridgeUp = false; }
+    authEnabled = !!j.authEnabled;
+  } catch { bridgeUp = false; authEnabled = false; }
+  document.getElementById("btnSignOut").hidden = !(bridgeUp && authEnabled);
   return bridgeUp;
 }
+
+document.getElementById("btnSignOut").addEventListener("click", async () => {
+  try { await fetch(BRIDGE + "/api/logout", { method: "POST" }); } catch {}
+  location.href = "/login";
+});
 
 /* ── Watchlist bar ─────────────────────────────────────────────────────────
    A short, server-saved ticker list with live quotes (yfinance, via the
