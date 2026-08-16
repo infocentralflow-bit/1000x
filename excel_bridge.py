@@ -935,6 +935,23 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"tickers": tickers, "quotes": quotes_service.fetch_quotes(tickers)})
             return
 
+        if path == "/api/watchlist/history":
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            ticker = (qs.get("ticker") or [""])[0].strip().upper()
+            range_key = (qs.get("range") or ["3mo"])[0].strip().lower()
+            if not TICKER_RE.match(ticker):
+                self._json({"error": "Invalid ticker."}, 400)
+                return
+            if range_key not in quotes_service.HISTORY_RANGES:
+                self._json({"error": "Invalid range."}, 400)
+                return
+            points, err = quotes_service.fetch_history(ticker, range_key)
+            if err:
+                self._json({"ticker": ticker, "points": [], "error": err}, 502)
+                return
+            self._json({"ticker": ticker, "points": points, "error": None})
+            return
+
         if path == "/api/notion/databases":
             if not NOTION_TOKEN:
                 self._json({"error": "Notion isn't configured on the server yet."}, 400)
