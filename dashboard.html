@@ -540,6 +540,18 @@ textarea.notion-notes {
   font-size: 13.5px; font-weight: 500; line-height: 1.5;
 }
 textarea.notion-notes[disabled] { opacity: .5; cursor: not-allowed; }
+.notion-md-toolbar {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 5px;
+  margin-bottom: 6px;
+}
+.notion-md-toolbar .fill-btn.wide {
+  height: 22px; min-height: 0; font-size: 11px; margin-left: 0;
+}
+.notion-md-toolbar .fill-btn[disabled] { opacity: .35; cursor: not-allowed; }
+.notion-md-sep {
+  width: 1px; height: 16px; margin: 0 2px;
+  background: var(--hairline); flex: none;
+}
 .notion-db-row {
   display: flex; align-items: center; gap: 10px; width: 100%;
   padding: 11px 13px; border-radius: var(--r-sm);
@@ -1033,11 +1045,24 @@ footer.legal code {
         <label for="notionNotes">Research notes
           <span style="text-transform:none;font-weight:400;color:var(--text-muted)">— synced to Notion automatically as you type</span>
         </label>
+        <div class="notion-md-toolbar" id="notionMdToolbar" role="toolbar" aria-label="Insert Notion formatting" aria-controls="notionNotes">
+          <button type="button" class="fill-btn wide" data-md="h1" title="Heading 1 → # " disabled>H1</button>
+          <button type="button" class="fill-btn wide" data-md="h2" title="Heading 2 → ## " disabled>H2</button>
+          <button type="button" class="fill-btn wide" data-md="h3" title="Heading 3 → ### " disabled>H3</button>
+          <span class="notion-md-sep" aria-hidden="true"></span>
+          <button type="button" class="fill-btn wide" data-md="bold" title="Bold → **text**" disabled><b>B</b></button>
+          <button type="button" class="fill-btn wide" data-md="italic" title="Italic → *text*" disabled><i>I</i></button>
+          <button type="button" class="fill-btn wide" data-md="code" title="Code → `text`" disabled>&lt;/&gt;</button>
+          <button type="button" class="fill-btn wide" data-md="link" title="Link → [text](url)" disabled>🔗</button>
+          <span class="notion-md-sep" aria-hidden="true"></span>
+          <button type="button" class="fill-btn wide" data-md="bullet" title="Bullet list → - " disabled>•</button>
+          <button type="button" class="fill-btn wide" data-md="numbered" title="Numbered list → 1. " disabled>1.</button>
+          <button type="button" class="fill-btn wide" data-md="todo" title="To-do → - [ ] " disabled>☐</button>
+          <button type="button" class="fill-btn wide" data-md="quote" title="Quote → &gt; " disabled>"</button>
+          <button type="button" class="fill-btn wide" data-md="divider" title="Divider → ---" disabled>—</button>
+        </div>
         <textarea id="notionNotes" class="calc-input notion-notes" rows="4" disabled
           placeholder="Save this projection, then Sync to Notion once — after that, notes you write here keep themselves in sync."></textarea>
-        <div class="calc-hint">Formats in Notion: <code># heading</code>, <code>- bullet</code>, <code>1. numbered</code>,
-          <code>- [ ] to-do</code>, <code>&gt; quote</code>, <code>---</code> divider, <code>**bold**</code>, <code>*italic*</code>,
-          <code>`code`</code>, <code>[text](url)</code>.</div>
       </div>
     </div>
   </div>
@@ -1981,7 +2006,9 @@ function updateNotionUI() {
   const hasProject = !!currentProjectId;
 
   syncBtn.disabled = !hasProject || notionSyncing;
-  notesEl.disabled = !hasProject || !notionState.pageId;
+  const notesReady = hasProject && !!notionState.pageId;
+  notesEl.disabled = !notesReady;
+  document.querySelectorAll('#notionMdToolbar [data-md]').forEach(b => { b.disabled = !notesReady; });
 
   if (notionState.pageId && notionState.url) {
     openBtn.hidden = false;
@@ -2072,6 +2099,73 @@ async function notionPushNotes() {
     statusEl.className = "notion-status err";
   }
 }
+
+/* ── Formatting toolbar: inserts the exact markdown markdown_to_blocks()
+   parses, at the cursor, rather than making you remember the syntax. Line
+   markers (heading/bullet/etc.) go at the start of the current line;
+   bold/italic/code wrap the selection (or open with the cursor between the
+   markers if nothing's selected); divider/link get their own small cases. */
+function notionInsertMarkdown(kind) {
+  const ta = document.getElementById("notionNotes");
+  if (!ta || ta.disabled) return;
+  const value = ta.value;
+  const start = ta.selectionStart, end = ta.selectionEnd;
+  const selected = value.slice(start, end);
+
+  const setValue = (before, insert, after, selStart, selEnd) => {
+    ta.value = before + insert + after;
+    ta.setSelectionRange(selStart, selEnd);
+  };
+  const linePrefix = (prefix) => {
+    const lineStart = value.lastIndexOf("\n", start - 1) + 1;
+    setValue(value.slice(0, lineStart), prefix, value.slice(lineStart),
+      start + prefix.length, end + prefix.length);
+  };
+  const inlineWrap = (marker) => {
+    if (selected) {
+      setValue(value.slice(0, start), marker + selected + marker, value.slice(end),
+        start + marker.length, start + marker.length + selected.length);
+    } else {
+      setValue(value.slice(0, start), marker + marker, value.slice(end),
+        start + marker.length, start + marker.length);
+    }
+  };
+
+  switch (kind) {
+    case "h1": linePrefix("# "); break;
+    case "h2": linePrefix("## "); break;
+    case "h3": linePrefix("### "); break;
+    case "bullet": linePrefix("- "); break;
+    case "numbered": linePrefix("1. "); break;
+    case "todo": linePrefix("- [ ] "); break;
+    case "quote": linePrefix("> "); break;
+    case "bold": inlineWrap("**"); break;
+    case "italic": inlineWrap("*"); break;
+    case "code": inlineWrap("`"); break;
+    case "link":
+      if (selected) {
+        setValue(value.slice(0, start), `[${selected}](`, ")" + value.slice(end),
+          start + selected.length + 3, start + selected.length + 3);
+      } else {
+        setValue(value.slice(0, start), "[text](url)", value.slice(end), start + 1, start + 5);
+      }
+      break;
+    case "divider": {
+      const before = start > 0 && value[start - 1] !== "\n" ? "\n" : "";
+      const after = end < value.length && value[end] !== "\n" ? "\n" : "";
+      const insert = before + "---" + after;
+      setValue(value.slice(0, start), insert, value.slice(end), start + insert.length, start + insert.length);
+      break;
+    }
+    default: return;
+  }
+  ta.focus();
+  onNotionNotesInput();
+}
+document.getElementById("notionMdToolbar").addEventListener("click", (ev) => {
+  const btn = ev.target.closest("[data-md]");
+  if (btn && !btn.disabled) notionInsertMarkdown(btn.dataset.md);
+});
 
 /* ── Database picker modal ─────────────────────────────────────────────── */
 async function openNotionSettingsModal() {
