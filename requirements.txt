@@ -3,3 +3,7 @@ openpyxl>=3.1
 # wiped on restart). Harmless locally — the file-based saves/ path never
 # imports it.
 psycopg[binary]>=3.1
+# Header watchlist quotes. No API key needed. quotes_service.py imports it
+# lazily, so a missing install degrades to per-ticker errors instead of
+# crashing the bridge.
+yfinance>=0.2.40

@@ -2,6 +2,7 @@
 .bridge_credentials.json
 saves/
 notion_settings.json
+watchlist.json
 __pycache__/
 *.pyc
 .app-profile/
