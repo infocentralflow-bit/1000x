@@ -66,7 +66,11 @@ HISTORY_RANGES = {
 def fetch_history(ticker, range_key="3mo"):
     """Returns (points, error) — points is a list of {"date", "close"}, oldest first.
     "date" is "YYYY-MM-DD" for daily+ intervals, "YYYY-MM-DD HH:MM" for intraday ones.
-    Not cached: only fetched when a chart is actually opened."""
+    Not cached: only fetched when a chart is actually opened. `ticker` isn't
+    restricted to the saved watchlist here — the bridge validates user-supplied
+    tickers before calling this; the benchmark overlay passes BENCHMARK_TICKER
+    (an index symbol, "^GSPC") straight through, since that never comes from
+    the client."""
     if range_key not in HISTORY_RANGES:
         return None, "Invalid range."
     period, interval = HISTORY_RANGES[range_key]
@@ -90,3 +94,80 @@ def fetch_history(ticker, range_key="3mo"):
         for idx, row in hist.iterrows()
     ]
     return points, None
+
+
+BENCHMARK_TICKER = "^GSPC"    # S&P 500 — the only benchmark the chart overlay supports
+
+_SNAPSHOT_CACHE = {}          # ticker -> (fetched_at, snapshot_dict)
+_SNAPSHOT_CACHE_TTL = 3600    # seconds — market cap/P-E/sector move far slower than price
+
+
+def _safe_num(v):
+    return v if isinstance(v, (int, float)) else None
+
+
+def _empty_snapshot(ticker, error=None):
+    return {"ticker": ticker, "marketCap": None, "trailingPE": None, "dividendYield": None,
+            "fiftyTwoWeekLow": None, "fiftyTwoWeekHigh": None, "sector": None, "error": error}
+
+
+def fetch_snapshot(ticker):
+    """Returns one {"ticker", "marketCap", "trailingPE", "dividendYield",
+    "fiftyTwoWeekLow", "fiftyTwoWeekHigh", "sector", "error"} dict. Every field
+    degrades independently to None — one missing field never blanks the rest.
+    "error" is only set when nothing at all came back. Cached for an hour:
+    these move far slower than price, so there's no reason to refetch on
+    every chart open."""
+    now = time.time()
+    cached = _SNAPSHOT_CACHE.get(ticker)
+    if cached and now - cached[0] <= _SNAPSHOT_CACHE_TTL:
+        return cached[1]
+
+    try:
+        import yfinance as yf
+    except ImportError:
+        snap = _empty_snapshot(ticker, "yfinance isn't installed on the server")
+        _SNAPSHOT_CACHE[ticker] = (now, snap)
+        return snap
+
+    t = yf.Ticker(ticker)
+    snap = _empty_snapshot(ticker)
+
+    # fast_info can raise per-attribute for fields a given ticker type doesn't
+    # have (e.g. an ETF) — check each independently so one miss doesn't blank
+    # the others.
+    try:
+        snap["marketCap"] = _safe_num(t.fast_info.market_cap)
+    except Exception:                                              # noqa: BLE001
+        pass
+    try:
+        snap["fiftyTwoWeekLow"] = _safe_num(t.fast_info.year_low)
+    except Exception:                                              # noqa: BLE001
+        pass
+    try:
+        snap["fiftyTwoWeekHigh"] = _safe_num(t.fast_info.year_high)
+    except Exception:                                              # noqa: BLE001
+        pass
+
+    # .info is one much heavier network call (a full quoteSummary scrape) —
+    # if it fails, trailingPE/dividendYield/sector fail together, which is
+    # correct since they share this one fetch.
+    try:
+        info = t.info or {}
+    except Exception:                                              # noqa: BLE001
+        info = {}
+    snap["trailingPE"] = _safe_num(info.get("trailingPE"))
+    snap["sector"] = info.get("sector") or None
+    dy = _safe_num(info.get("dividendYield"))
+    if dy is not None:
+        # Yahoo's raw field has flip-flopped between a fraction (0.006) and a
+        # whole percent (0.6) across API changes — normalize by magnitude so
+        # this always comes out as a percent number (e.g. 2.53 meaning 2.53%).
+        snap["dividendYield"] = dy * 100 if dy <= 1 else dy
+
+    if all(snap[k] is None for k in
+           ("marketCap", "trailingPE", "dividendYield", "fiftyTwoWeekLow", "fiftyTwoWeekHigh", "sector")):
+        snap["error"] = "No snapshot data found for this ticker."
+
+    _SNAPSHOT_CACHE[ticker] = (now, snap)
+    return snap
