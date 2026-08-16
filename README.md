@@ -258,6 +258,30 @@ every redeploy — the dashboard's own `localStorage` is unaffected, so nothing 
 in-browser is at risk, but treat the cloud copy as not persistent server-side. Export/Import
 (in the Open modal) is the reliable way to move projections to or from the cloud instance.
 
+## Notion Research (optional)
+
+Push a saved projection to a Notion page — revenue/net income/EPS/implied valuation per
+scenario, plus a notes field that syncs back to Notion automatically as you type. Uses a
+Notion **internal integration** (one token, set by you), not OAuth — there's no "each user
+connects their own workspace" step because this app doesn't have separate user accounts.
+
+1. Create an integration at [notion.so/my-integrations](https://www.notion.so/my-integrations)
+   → **New integration** → give it a name → copy its **Internal Integration Secret**.
+2. In Notion, open the database you want stock research pages written into → **•••** menu →
+   **Connections** → add the integration you just created. (Without this step the app can see
+   the database exists but can't read or write to it.)
+3. Set `NOTION_TOKEN` to that secret — in Render's environment variables if it's deployed
+   there, or as a local env var (`set NOTION_TOKEN=secret_...` / `export NOTION_TOKEN=...`)
+   before running `excel_bridge.py` locally.
+4. In the app: save a projection (Notion sync needs a name to attach to), then use the
+   **Database** button in the Notion Research section to pick which database to sync into,
+   then **Sync to Notion**.
+
+The token never reaches the browser — every Notion API call happens in `excel_bridge.py`
+(`notion_service.py`), same as the Alpha Vantage calls already do. Which Notion page belongs
+to which saved projection is stored the same way saved projections themselves are (Postgres
+if `NEON_DATABASE_URL` is set, a local file otherwise).
+
 ## Notes
 
 - The bridge binds to `127.0.0.1` only — nothing is exposed to your network.
