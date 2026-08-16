@@ -208,21 +208,6 @@ body {
 .is-busy .spinner { display: block; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* ── Source badge ────────────────────────────────────────────────────────── */
-.badge {
-  display: inline-flex; align-items: center; gap: 7px;
-  padding: 5px 11px; border-radius: 999px;
-  font-size: 11.5px; font-weight: 650; letter-spacing: .01em;
-  border: 1px solid transparent; white-space: nowrap;
-}
-.badge .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
-.badge-sample   { background: rgba(250,178,25,.12); color: #f0be4e; border-color: rgba(250,178,25,.32); }
-.badge-sample .dot   { background: var(--warn); }
-.badge-workbook { background: rgba(6,176,122,.12); color: #35c294; border-color: rgba(6,176,122,.3); }
-.badge-workbook .dot { background: var(--bull); }
-.badge-manual   { background: rgba(57,135,229,.12); color: #6ba6ee; border-color: rgba(57,135,229,.3); }
-.badge-manual .dot   { background: var(--base); }
-
 /* ── Notice strip ────────────────────────────────────────────────────────── */
 .notice {
   display: flex; align-items: flex-start; gap: 12px;
@@ -870,7 +855,6 @@ footer.legal code {
   .topbar .field .input, .topbar .project-name-btn { width: 100%; }
   .topbar .btn-cluster { width: 100%; justify-content: space-between; }
   .topbar #btnRefresh { width: 100%; }
-  .topbar #srcBadge { align-self: flex-start; }
   .kpi-value { font-size: 23px; }
 
   table.model th, table.model td { padding: 6px 8px; font-size: 12.5px; }
@@ -984,8 +968,6 @@ footer.legal code {
       <label for="apikey">Alpha Vantage key</label>
       <input id="apikey" class="input" type="password" placeholder="optional" autocomplete="off" aria-label="Alpha Vantage API key">
     </div>
-
-    <span id="srcBadge" class="badge badge-sample" data-view-only="projection"><span class="dot"></span><span id="srcText">Sample data</span></span>
 
     <button id="btnRefresh" class="btn btn-primary" data-view-only="projection">
       <span class="spinner" aria-hidden="true"></span>
@@ -2736,18 +2718,6 @@ function fillRow(sc, field) {
 function markSource(src) {
   if (dataSource === "workbook" && src === "manual") { dataSource = "manual"; }
   else if (dataSource !== "workbook" || src === "workbook") { dataSource = src; }
-  const badge = document.getElementById("srcBadge");
-  const text = document.getElementById("srcText");
-  const map = {
-    sample:   ["badge-sample",   "Sample data"],
-    workbook: ["badge-workbook", "Live from workbook"],
-    api:      ["badge-workbook", "Live from Alpha Vantage"],
-    manual:   ["badge-manual",   "Manual overrides"],
-  };
-  const [cls, label] = map[dataSource] || map.sample;
-  badge.className = "badge " + cls;
-  text.textContent = label;
-
   const notice = document.getElementById("notice");
   if (dataSource === "sample" && !noticeDismissed) notice.classList.remove("hidden");
   else notice.classList.add("hidden");
