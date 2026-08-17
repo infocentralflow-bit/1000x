@@ -3432,12 +3432,17 @@ function renderWatchlistChart(points, range, benchmarkPoints) {
     y1: padT, y2: padT + plotH, opacity: "0", "shape-rendering": "crispEdges" });
   svg.append(crosshair);
 
+  // Colored by direction over the visible range (first point vs. last), same
+  // green/red as the rest of the app's gain/loss language — not by day
+  // change, so switching ranges can flip the line's color too.
+  const stockColor = stockVals[stockVals.length - 1] >= stockVals[0] ? "#35c294" : "#ff8f8f";
+
   const stockD = stockVals.map((v, i) => `${i ? "L" : "M"}${Xstock(i).toFixed(2)},${Y(v).toFixed(2)}`).join(" ");
-  const stockPath = el("path", { d: stockD, fill: "none", stroke: "#3987e5", "stroke-width": "2",
+  const stockPath = el("path", { d: stockD, fill: "none", stroke: stockColor, "stroke-width": "2",
     "stroke-linejoin": "round", "stroke-linecap": "round" });
   svg.append(stockPath);
   drawLineIn(stockPath);
-  svg.append(el("circle", { cx: Xstock(stockVals.length - 1), cy: Y(stockVals[stockVals.length - 1]), r: "3.5", fill: "#3987e5" }));
+  svg.append(el("circle", { cx: Xstock(stockVals.length - 1), cy: Y(stockVals[stockVals.length - 1]), r: "3.5", fill: stockColor }));
 
   if (hasBenchmark) {
     const Xbench = Xfor(benchmarkPoints.length);
@@ -3450,7 +3455,7 @@ function renderWatchlistChart(points, range, benchmarkPoints) {
     svg.append(el("circle", { cx: Xbench(benchVals.length - 1), cy: Y(benchVals[benchVals.length - 1]), r: "3", fill: "#ffd966" }));
 
     legendEl.innerHTML =
-      `<span class="legend-item"><span class="swatch" style="background:#3987e5"></span>${escapeHtml(watchlistChartTicker || "")}</span>
+      `<span class="legend-item"><span class="swatch" style="background:${stockColor}"></span>${escapeHtml(watchlistChartTicker || "")}</span>
        <span class="legend-item"><span class="swatch" style="background:#ffd966"></span>S&amp;P 500</span>`;
     legendEl.hidden = false;
   }
@@ -3473,7 +3478,7 @@ function renderWatchlistChart(points, range, benchmarkPoints) {
   svg.append(gSel);
 
   // hover dot, drawn on top of the line and end marker
-  svg.append(el("circle", { id: "wlCrosshairDot", r: "4.5", fill: "#3987e5",
+  svg.append(el("circle", { id: "wlCrosshairDot", r: "4.5", fill: stockColor,
     stroke: "#16161a", "stroke-width": "2", opacity: "0" }));
 
   // Pass the plotted (possibly %-transformed) values through so the hover
