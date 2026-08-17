@@ -127,7 +127,8 @@ body {
   .watchlist-scroll { overflow-x: auto; scrollbar-width: none; -webkit-mask-image: none; mask-image: none; }
   .watchlist-scroll::-webkit-scrollbar { display: none; }
 }
-.watchlist-empty { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+.watchlist-empty { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+.watchlist-empty svg { opacity: .55; flex: none; }
 .watchlist-chip {
   display: inline-flex; align-items: center; flex: none;
   padding-right: 7px; border-radius: 999px;
@@ -556,7 +557,9 @@ body {
 .project-row-meta { font-size: 11.5px; color: var(--text-muted); margin-top: 3px; }
 .project-row-actions { display: flex; gap: 5px; flex: none; }
 .project-row-actions .icon-btn { width: 30px; height: 30px; }
-.project-empty { text-align: center; padding: 30px 10px; color: var(--text-muted); font-size: 13px; }
+.project-empty { text-align: center; padding: 30px 10px; color: var(--text-muted); font-size: 13px; line-height: 1.6; }
+.project-empty svg { display: block; margin: 0 auto 10px; opacity: .4; }
+.project-empty strong { color: var(--text-secondary); font-weight: 650; }
 .modal-tabs { display: flex; gap: 4px; }
 .modal-tabs button {
   appearance: none; border: 1px solid var(--hairline); background: var(--surface-2);
@@ -647,6 +650,7 @@ textarea.notion-notes {
   font-size: 13.5px; font-weight: 500; line-height: 1.5;
 }
 textarea.notion-notes[disabled] { opacity: .5; cursor: not-allowed; }
+textarea.notion-notes:not([disabled]):placeholder-shown { background: var(--gold-glow); }
 .notion-md-toolbar {
   display: flex; align-items: center; flex-wrap: wrap; gap: 5px;
   margin-bottom: 6px;
@@ -818,6 +822,21 @@ td.cellinput { padding: 4px 6px; }
 }
 .cell-edit.flash { animation: flash .5s var(--ease); }
 @keyframes flash { 0% { background: rgba(255,217,102,.22); } 100% { background: #08080a; } }
+
+/* Watchlist chip: brief tint when a price moves between polls. */
+@keyframes wl-pulse-up   { 0% { background: rgba(53,194,148,.28); } 100% { background: transparent; } }
+@keyframes wl-pulse-down { 0% { background: rgba(255,143,143,.28); } 100% { background: transparent; } }
+.watchlist-chip.wl-pulse-up   { animation: wl-pulse-up   .9s var(--ease); }
+.watchlist-chip.wl-pulse-down { animation: wl-pulse-down .9s var(--ease); }
+
+/* A brief ring on whatever the user just successfully acted on — Save,
+   Sync to Notion, a newly-added watchlist ticker — spatially anchoring the
+   confirmation alongside the (non-spatial) toast, not replacing it. */
+@keyframes success-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(53,194,148,.55); }
+  100% { box-shadow: 0 0 0 10px rgba(53,194,148,0); }
+}
+.success-pulse { animation: success-pulse .6s var(--ease); }
 
 .rowlabel-note { font-size: 10.5px; color: var(--text-muted); font-weight: 400; display: block; }
 
@@ -1772,11 +1791,16 @@ function onCompanyEdit(ev) {
   updateDerivedKPI();
 }
 
+let lastMarginPct = null;
 function updateDerivedKPI() {
   const margin = safeDiv(company.netIncome, company.revenue);
   const card = document.querySelector(".kpi.derived .kpi-value");
   if (!card) return;
-  card.textContent = margin ? (margin * 100).toFixed(1) + "%" : "—";
+  const pct = margin ? margin * 100 : null;
+  const fmt = (v) => v == null ? "—" : v.toFixed(1) + "%";
+  if (pct == null) card.textContent = fmt(pct);
+  else animateNumber(card, lastMarginPct == null ? pct : lastMarginPct, pct, fmt);
+  lastMarginPct = pct;
   card.classList.toggle("is-empty", !margin);
 }
 
@@ -2216,6 +2240,7 @@ async function notionSync() {
     notionState = notionNormalizeState(j.notion);
     persistNotionToActiveProject();
     flashToast("Synced to Notion.");
+    pulseSuccess(document.getElementById("btnNotionSync"));
   } catch (e) {
     flashToast("Notion sync failed — " + String(e.message || e), true);
   } finally {
@@ -2360,10 +2385,12 @@ async function openNotionSettingsModal() {
   }
 }
 
+const ICON_EMPTY_LINK = `<svg width="22" height="22" viewBox="0 0 16 16" fill="none"><path d="M6.5 9.5a2.5 2.5 0 0 0 3.5.2l1.8-1.8a2.5 2.5 0 0 0-3.5-3.5L7 5.7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M9.5 6.5a2.5 2.5 0 0 0-3.5-.2L4.2 8.1a2.5 2.5 0 0 0 3.5 3.5L9 10.3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>`;
+
 function renderNotionDbList(databases, current) {
   const listEl = document.getElementById("notionDbList");
   if (!databases.length) {
-    listEl.innerHTML = `<div class="project-empty">No databases are shared with this integration yet.<br>
+    listEl.innerHTML = `<div class="project-empty">${ICON_EMPTY_LINK}No databases shared with this integration yet.<br>
       In Notion: open a database → ••• menu → Connections → add your integration.</div>`;
     return;
   }
@@ -2437,6 +2464,27 @@ function importProjectsFromFile(file) {
   reader.readAsText(file);
 }
 
+/* ── Number count-up ───────────────────────────────────────────────────────
+   Animates a text node's displayed number from `from` to `to`, re-running
+   `fmt` each frame. For read-only derived displays only — never wire this
+   into a live <input> a user is typing into, it'll fight the cursor. */
+function animateNumber(node, from, to, fmt, dur = 500) {
+  if (!node) return;
+  if (!isFinite(from) || !isFinite(to) || from === to ||
+      matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    node.textContent = fmt(to);
+    return;
+  }
+  const t0 = performance.now();
+  const ease = t => 1 - Math.pow(1 - t, 3);
+  function step(now) {
+    const t = Math.min(1, (now - t0) / dur);
+    node.textContent = fmt(from + (to - from) * ease(t));
+    if (t < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+
 /* ── Chart ──────────────────────────────────────────────────────────────── */
 const METRIC_META = {
   revenue:   { label: "Revenue",           fmt: fmtMShort, axis: (v) => fmtMShort(v) },
@@ -2467,10 +2515,23 @@ function niceTicks(min, max, count = 5) {
   return out;
 }
 
+// Draws an SVG line path in over `duration`ms via stroke-dashoffset, instead
+// of it just appearing fully-formed. A CSS transition (not a JS rAF loop) so
+// it inherits the page's blanket prefers-reduced-motion override for free.
+function drawLineIn(pathEl, duration = 700, delay = 0) {
+  const len = pathEl.getTotalLength();
+  pathEl.style.strokeDasharray = len;
+  pathEl.style.strokeDashoffset = len;
+  requestAnimationFrame(() => {
+    pathEl.style.transition = `stroke-dashoffset ${duration}ms var(--ease) ${delay}ms`;
+    pathEl.style.strokeDashoffset = "0";
+  });
+}
+
 const PAD = { t: 26, r: 132, b: 40, l: 74 };
 const VB = { w: 920, h: 340 };
 
-function renderChart() {
+function renderChart(animate = false) {
   const svg = document.getElementById("chart");
   // keep <title>/<desc>, drop the rest
   [...svg.childNodes].forEach(n => { if (!["title", "desc"].includes(n.nodeName)) n.remove(); });
@@ -2540,11 +2601,14 @@ function renderChart() {
   svg.append(crosshair);
 
   // series lines — 2px, round joins
+  const seriesDelay = { base: 0, bear: 60, bull: 120 };
   for (const k of keys) {
     const s = SERIES[k], vals = results[k][metric];
     const d = vals.map((v, i) => `${i ? "L" : "M"}${X(i).toFixed(2)},${Y(v).toFixed(2)}`).join(" ");
-    svg.append(el("path", { d, fill: "none", stroke: s.color, "stroke-width": "2",
-      "stroke-linejoin": "round", "stroke-linecap": "round" }));
+    const path = el("path", { d, fill: "none", stroke: s.color, "stroke-width": "2",
+      "stroke-linejoin": "round", "stroke-linecap": "round" });
+    svg.append(path);
+    if (animate) drawLineIn(path, 700, seriesDelay[k] || 0);
   }
 
   // markers — ≥8px, with a 2px surface ring so overlaps stay readable
@@ -2932,41 +2996,66 @@ let watchlistTickers = [];
 let watchlistQuoteMap = {};
 let watchlistTimer = null;
 
-function watchlistChangeHtml(q) {
+function watchlistChangeHtml(q, prevQ) {
   if (q.error) return `<span class="wl-err" title="${escapeHtml(q.error)}">no quote</span>`;
   if (q.price == null) return '<span class="wl-err">loading…</span>';
   const dir = q.changePct > 0 ? "up" : q.changePct < 0 ? "down" : "flat";
   const sign = q.changePct > 0 ? "+" : "";
-  return `<span class="wl-price">$${q.price.toFixed(2)}</span>
+  // Start the displayed price at the previous poll's value so animateWatchlistPrices()
+  // can count it up/down to the new one, instead of it just appearing already-updated.
+  const from = prevQ && isFinite(prevQ.price) ? prevQ.price : q.price;
+  return `<span class="wl-price" data-price="${q.price}">$${from.toFixed(2)}</span>
     <span class="wl-change ${dir}">${sign}${q.changePct.toFixed(2)}%</span>`;
 }
 
-function watchlistChipHtml(ticker, q) {
+function watchlistChipHtml(ticker, q, prevQ) {
   q = q || {};
-  return `<div class="watchlist-chip" role="listitem" data-ticker="${ticker}">
+  prevQ = prevQ || {};
+  let pulseClass = "";
+  if (q.price != null && isFinite(prevQ.price) && q.price !== prevQ.price) {
+    pulseClass = q.price > prevQ.price ? " wl-pulse-up" : " wl-pulse-down";
+  }
+  return `<div class="watchlist-chip${pulseClass}" role="listitem" data-ticker="${ticker}">
       <button type="button" class="wl-chip-btn" data-chart="${ticker}" title="View ${ticker} chart">
         <span class="wl-sym">${ticker}</span>
-        ${watchlistChangeHtml(q)}
+        ${watchlistChangeHtml(q, prevQ)}
       </button>
       <button type="button" class="wl-remove" data-remove="${ticker}" title="Remove ${ticker}" aria-label="Remove ${ticker} from watchlist">×</button>
     </div>`;
 }
 
+// After chip HTML lands in the DOM, count each price up/down from the
+// previous poll's value to the new one (a no-op when there's no previous
+// value, e.g. first load or a resize-triggered re-render).
+function animateWatchlistPrices(prevQuoteMap) {
+  document.querySelectorAll(".wl-price[data-price]").forEach(node => {
+    const to = parseFloat(node.dataset.price);
+    const chip = node.closest(".watchlist-chip");
+    const prevQ = chip && prevQuoteMap[chip.dataset.ticker];
+    const from = prevQ && isFinite(prevQ.price) ? prevQ.price : to;
+    animateNumber(node, from, to, (v) => "$" + v.toFixed(2));
+  });
+}
+
 const WATCHLIST_SCROLL_SPEED = 34; // px/sec — a slow, readable ticker-tape crawl
 
-function renderWatchlist() {
+function renderWatchlist(prevQuoteMap = {}) {
   const scroll = document.getElementById("watchlistScroll");
   if (!watchlistTickers.length) {
-    scroll.innerHTML = '<span class="watchlist-empty">No tickers yet — tap + to add one.</span>';
+    scroll.innerHTML = `<span class="watchlist-empty">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 11l3.5-4L8 9.5 14 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="14" cy="3" r="1.3" fill="currentColor"/></svg>
+      No tickers yet — tap + to add one.</span>`;
     return;
   }
-  const chipsHtml = watchlistTickers.map(t => watchlistChipHtml(t, watchlistQuoteMap[t])).join("");
+  const chipsHtml = watchlistTickers.map(t => watchlistChipHtml(t, watchlistQuoteMap[t], prevQuoteMap[t])).join("");
   scroll.innerHTML = `<div class="watchlist-track">${chipsHtml}</div>`;
+  animateWatchlistPrices(prevQuoteMap);
   const track = scroll.querySelector(".watchlist-track");
   const singleWidth = track.scrollWidth;
   // Only crawl when the chips don't already fit — otherwise leave it static.
   if (singleWidth <= scroll.clientWidth) return;
   track.insertAdjacentHTML("beforeend", chipsHtml); // duplicate for a seamless loop
+  animateWatchlistPrices(prevQuoteMap); // covers the duplicated copy too
   track.classList.add("watchlist-track-scrolling");
   track.style.setProperty("--wl-duration", (singleWidth / WATCHLIST_SCROLL_SPEED) + "s");
 }
@@ -2975,14 +3064,15 @@ let watchlistResizeTimer = null;
 window.addEventListener("resize", () => {
   if (!watchlistTickers.length) return;
   clearTimeout(watchlistResizeTimer);
-  watchlistResizeTimer = setTimeout(renderWatchlist, 200);
+  watchlistResizeTimer = setTimeout(() => renderWatchlist(), 200);
 });
 
 function applyWatchlistResult(j) {
+  const prevQuoteMap = watchlistQuoteMap;
   watchlistTickers = j.tickers || [];
   watchlistQuoteMap = {};
   (j.quotes || []).forEach(q => { watchlistQuoteMap[q.ticker] = q; });
-  renderWatchlist();
+  renderWatchlist(prevQuoteMap);
 }
 
 async function loadWatchlist() {
@@ -3009,6 +3099,8 @@ async function addWatchlistTicker(raw) {
   if (!t || watchlistTickers.includes(t)) return;
   try {
     await saveWatchlist([...watchlistTickers, t]);
+    flashToast("Added " + t + " to your watchlist.");
+    pulseSuccess(document.querySelector(`.watchlist-chip[data-ticker="${t}"]`));
   } catch (e) {
     flashToast("Couldn't add " + t + " — " + String(e.message || e), true);
   }
@@ -3268,13 +3360,18 @@ function renderWatchlistChart(points, range, benchmarkPoints) {
   svg.append(crosshair);
 
   const stockD = stockVals.map((v, i) => `${i ? "L" : "M"}${Xstock(i).toFixed(2)},${Y(v).toFixed(2)}`).join(" ");
-  svg.append(el("path", { d: stockD, fill: "none", stroke: "#3987e5", "stroke-width": "2",
-    "stroke-linejoin": "round", "stroke-linecap": "round" }));
+  const stockPath = el("path", { d: stockD, fill: "none", stroke: "#3987e5", "stroke-width": "2",
+    "stroke-linejoin": "round", "stroke-linecap": "round" });
+  svg.append(stockPath);
+  drawLineIn(stockPath);
   svg.append(el("circle", { cx: Xstock(stockVals.length - 1), cy: Y(stockVals[stockVals.length - 1]), r: "3.5", fill: "#3987e5" }));
 
   if (hasBenchmark) {
     const Xbench = Xfor(benchmarkPoints.length);
     const benchD = benchVals.map((v, i) => `${i ? "L" : "M"}${Xbench(i).toFixed(2)},${Y(v).toFixed(2)}`).join(" ");
+    // No drawLineIn here — it animates via stroke-dasharray/-dashoffset, which
+    // would clobber this line's own "5 4" dash pattern (inline style wins
+    // over the SVG attribute) and make it render solid.
     svg.append(el("path", { d: benchD, fill: "none", stroke: "#ffd966", "stroke-width": "1.6",
       "stroke-dasharray": "5 4", "stroke-linejoin": "round", "stroke-linecap": "round" }));
     svg.append(el("circle", { cx: Xbench(benchVals.length - 1), cy: Y(benchVals[benchVals.length - 1]), r: "3", fill: "#ffd966" }));
@@ -3640,11 +3737,14 @@ function onNWEdit(ev) {
   renderNWTable();
 }
 
+let lastNwPerPeriod = null, lastNwFinal = null;
 function updateNWDerived() {
   const r = nwResults, m = nwMeta();
   const per = document.getElementById("nwPerPeriod");
   if (per) {
-    per.textContent = r.perPeriod === 0 ? EMDASH : fmtMoney(r.perPeriod);
+    if (r.perPeriod === 0) per.textContent = EMDASH;
+    else animateNumber(per, lastNwPerPeriod == null ? r.perPeriod : lastNwPerPeriod, r.perPeriod, fmtMoney);
+    lastNwPerPeriod = r.perPeriod === 0 ? null : r.perPeriod;
     per.classList.toggle("is-empty", r.perPeriod === 0);
   }
   const rate = document.getElementById("nwRate");
@@ -3656,7 +3756,9 @@ function updateNWDerived() {
   }
   const fin = document.getElementById("nwFinal");
   if (fin) {
-    fin.textContent = r.final === 0 ? EMDASH : fmtMoney(r.final);
+    if (r.final === 0) fin.textContent = EMDASH;
+    else animateNumber(fin, lastNwFinal == null ? r.final : lastNwFinal, r.final, fmtMoney);
+    lastNwFinal = r.final === 0 ? null : r.final;
     fin.classList.toggle("is-empty", r.final === 0);
   }
   const gs = document.getElementById("nwGrowthShare");
@@ -4104,7 +4206,7 @@ function applyPeriodUI() {
 
 function renderAll() {
   renderKPIs();
-  renderChart();
+  renderChart(true);
   renderSummary();
   renderScenarios();
   recomputeNW();
@@ -4120,7 +4222,7 @@ document.getElementById("metricSeg").addEventListener("click", (ev) => {
   [...ev.currentTarget.querySelectorAll("button")].forEach(x =>
     x.setAttribute("aria-pressed", String(x === b)));
   hideTooltip();
-  renderChart();
+  renderChart(true);
 });
 document.getElementById("btnFoldAll").addEventListener("click", () => {
   const next = !(scenarioOpen.base || scenarioOpen.bear || scenarioOpen.bull);
@@ -4210,6 +4312,16 @@ function flashToast(msg, isError) {
   flashToastTimer = setTimeout(() => t.classList.remove("show"), 2400);
 }
 
+// A brief ring on the element the user just acted on — alongside flashToast,
+// never instead of it.
+function pulseSuccess(elm) {
+  if (!elm) return;
+  elm.classList.remove("success-pulse");
+  void elm.offsetWidth; // restart the animation if it's still mid-run
+  elm.classList.add("success-pulse");
+  elm.addEventListener("animationend", () => elm.classList.remove("success-pulse"), { once: true });
+}
+
 /* ── Save As modal ──────────────────────────────────────────────────────── */
 const saveModal = document.getElementById("saveModal");
 const saveNameInput = document.getElementById("saveNameInput");
@@ -4244,6 +4356,7 @@ function confirmSaveModal() {
     updateProjectNameUI();
     updateNotionUI();   // currentProjectId just went from null to real — Sync/notes were disabled until now
     flashToast(`Saved as "${name}".`);
+    pulseSuccess(document.getElementById("btnSave"));
   } else {
     renameProject(renameTargetId, name);
     renderProjectList();
@@ -4257,6 +4370,7 @@ saveNameInput.addEventListener("keydown", (e) => { if (e.key === "Enter") confir
 /* ── Open Projections modal ────────────────────────────────────────────── */
 const openModal = document.getElementById("openModal");
 const ICON_LOAD = `<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3 8h10M8 3l5 5-5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const ICON_EMPTY_SAVE = `<svg width="22" height="22" viewBox="0 0 16 16" fill="none"><path d="M2.5 2.5h9l2 2v9a1 1 0 0 1-1 1h-10a1 1 0 0 1-1-1v-10a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M4.5 2.5v3.5h5.5v-3.5M4.5 14v-4.5h7V14" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>`;
 const ICON_RENAME = `<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M11.3 2.3a1.5 1.5 0 0 1 2.1 2.1L5.5 12.3l-3 .7.7-3 8.1-7.7Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>`;
 const ICON_DUP = `<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="5.5" y="5.5" width="8" height="8" rx="1.2" stroke="currentColor" stroke-width="1.3"/><path d="M10.5 5.5V3.7a1 1 0 0 0-1-1H3.7a1 1 0 0 0-1 1v5.8a1 1 0 0 0 1 1h1.8" stroke="currentColor" stroke-width="1.3"/></svg>`;
 const ICON_DELETE = `<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3 4.5h10M6.5 4.5V3a1 1 0 0 1 1-1h1a1 1 0 0 1 1 1v1.5M4.5 4.5l.6 8.4a1 1 0 0 0 1 .9h3.8a1 1 0 0 0 1-.9l.6-8.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
@@ -4266,7 +4380,7 @@ function renderProjectList() {
   const rows = Object.values(map).sort((a, b) => b.updatedAt - a.updatedAt);
   const host = document.getElementById("projectList");
   if (!rows.length) {
-    host.innerHTML = `<div class="project-empty">No saved projections yet.<br>Edit some numbers, then hit Save.</div>`;
+    host.innerHTML = `<div class="project-empty">${ICON_EMPTY_SAVE}Nothing saved yet.<br>Tweak a number, then hit <strong>Save</strong>.</div>`;
     return;
   }
   host.innerHTML = rows.map(p => {
@@ -4348,6 +4462,7 @@ document.getElementById("btnSave").addEventListener("click", () => {
   if (currentProjectId && saveOverActive()) {
     updateProjectNameUI();
     flashToast("Saved.");
+    pulseSuccess(document.getElementById("btnSave"));
   } else {
     openSaveAsModal();
   }
@@ -4436,19 +4551,31 @@ function calcResults() {
   return { series, rates, years, contributions: P + PMT * 12 * years };
 }
 
+let prevCalcFinals = {};
 function renderCalcCards(res) {
+  const finals = {};
   document.getElementById("calcCards").innerHTML = CALC_SERIES.map(s => {
     const arr = res.series[s.key];
     const final = arr[arr.length - 1];
+    finals[s.key] = final;
+    const from = prevCalcFinals[s.key];
+    const startText = (from == null || !isFinite(from)) ? money(final) : money(from);
     return `<div class="calc-card" style="--accent:${s.color}">
       <div class="calc-card-label">${s.label} projection · ${res.rates[s.key].toFixed(1)}%</div>
-      <div class="calc-card-value">${money(final)}</div>
+      <div class="calc-card-value" data-calc-key="${s.key}">${startText}</div>
       <div class="calc-card-rows">
         <div class="calc-row"><span class="k">Total contributions</span><span class="v">${money(res.contributions)}</span></div>
         <div class="calc-row"><span class="k">Interest earned</span><span class="v">${money(final - res.contributions)}</span></div>
       </div>
     </div>`;
   }).join("");
+  CALC_SERIES.forEach(s => {
+    const from = prevCalcFinals[s.key];
+    if (from == null || !isFinite(from) || from === finals[s.key]) return;
+    const node = document.querySelector(`.calc-card-value[data-calc-key="${s.key}"]`);
+    animateNumber(node, from, finals[s.key], money);
+  });
+  prevCalcFinals = finals;
 }
 
 function renderCalcChart(res) {
