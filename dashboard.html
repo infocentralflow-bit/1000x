@@ -206,6 +206,11 @@ body {
 .wl-range-btn.is-active {
   background: rgba(255,217,102,.1); border-color: rgba(255,217,102,.4); color: var(--gold);
 }
+.wl-snapshot-grid { grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.wl-snapshot-grid .kpi { padding: 10px 11px 9px; }
+.wl-snapshot-grid .kpi-label { font-size: 9.5px; margin-bottom: 5px; }
+.wl-snapshot-grid .kpi-value { font-size: 15px; font-weight: 650; letter-spacing: -.3px; }
+.watchlist-benchmark-row { margin-bottom: 12px; }
 
 /* The brand doubles as the product switcher, so the growing app family costs
    no extra horizontal room in an already-crowded bar (and no extra row on a
@@ -1549,6 +1554,7 @@ footer.legal code {
     </div>
     <div class="modal-body">
       <div class="watchlist-chart-meta" id="watchlistChartMeta"></div>
+      <div class="kpi-grid wl-snapshot-grid" id="watchlistSnapshotGrid" hidden></div>
       <div class="watchlist-range-row" id="watchlistRangeRow" role="tablist" aria-label="Chart range">
         <button type="button" class="wl-range-btn" data-range="1d" role="tab">1D</button>
         <button type="button" class="wl-range-btn" data-range="5d" role="tab">5D</button>
@@ -1558,12 +1564,16 @@ footer.legal code {
         <button type="button" class="wl-range-btn" data-range="1y" role="tab">1Y</button>
         <button type="button" class="wl-range-btn" data-range="ytd" role="tab">YTD</button>
       </div>
+      <div class="watchlist-benchmark-row">
+        <button type="button" id="watchlistBenchmarkToggle" class="wl-range-btn" aria-pressed="false">Compare to S&amp;P 500</button>
+      </div>
       <div class="chart-wrap">
         <svg id="watchlistChartSvg" viewBox="0 0 640 220" role="img" aria-labelledby="watchlistChartSvgTitle" tabindex="0">
           <title id="watchlistChartSvgTitle">Price chart</title>
         </svg>
         <div id="watchlistChartTooltip" class="tooltip" role="status" aria-live="polite"></div>
       </div>
+      <div class="chart-legend" id="watchlistChartLegend" hidden></div>
       <div class="watchlist-chart-status" id="watchlistChartStatus"></div>
     </div>
   </div>
@@ -3150,15 +3160,24 @@ watchlistAddInput.addEventListener("blur", () => {
 
 let watchlistChartTicker = null;
 let watchlistChartRange = "3mo";
+let watchlistBenchmarkOn = false;
 
 function openWatchlistChart(ticker) {
   watchlistChartTicker = ticker;
   watchlistChartRange = "3mo";
+  watchlistBenchmarkOn = false;
   document.getElementById("watchlistChartTitle").textContent = ticker;
   document.getElementById("watchlistChartMeta").innerHTML = watchlistChangeHtml(watchlistQuoteMap[ticker] || {});
   updateWatchlistRangeButtons();
+  const benchBtn = document.getElementById("watchlistBenchmarkToggle");
+  benchBtn.classList.remove("is-active");
+  benchBtn.setAttribute("aria-pressed", "false");
+  const snapshotGrid = document.getElementById("watchlistSnapshotGrid");
+  snapshotGrid.hidden = true;
+  snapshotGrid.innerHTML = "";
   openModalEl(document.getElementById("watchlistChartModal"));
   loadWatchlistChart();
+  loadWatchlistSnapshot();   // fire-and-forget — supplementary chrome, never blocks the chart
 }
 
 function updateWatchlistRangeButtons() {
@@ -3170,24 +3189,26 @@ function updateWatchlistRangeButtons() {
 }
 
 async function loadWatchlistChart() {
-  const ticker = watchlistChartTicker, range = watchlistChartRange;
+  const ticker = watchlistChartTicker, range = watchlistChartRange, wantBenchmark = watchlistBenchmarkOn;
   const statusEl = document.getElementById("watchlistChartStatus");
   statusEl.textContent = "Loading price history…";
   statusEl.className = "watchlist-chart-status";
-  renderWatchlistChart([], range);
+  renderWatchlistChart([], range, null);
   try {
-    const res = await fetch(BRIDGE + "/api/watchlist/history?ticker=" + encodeURIComponent(ticker)
-      + "&range=" + encodeURIComponent(range));
+    let url = BRIDGE + "/api/watchlist/history?ticker=" + encodeURIComponent(ticker)
+      + "&range=" + encodeURIComponent(range);
+    if (wantBenchmark) url += "&benchmark=1";
+    const res = await fetch(url);
     const j = await res.json();
     if (!res.ok || j.error) throw new Error(j.error || ("HTTP " + res.status));
-    // The user may have switched ticker/range while this was in flight.
-    if (ticker !== watchlistChartTicker || range !== watchlistChartRange) return;
+    // The user may have switched ticker/range/benchmark while this was in flight.
+    if (ticker !== watchlistChartTicker || range !== watchlistChartRange || wantBenchmark !== watchlistBenchmarkOn) return;
     const points = j.points || [];
-    renderWatchlistChart(points, range);
+    renderWatchlistChart(points, range, wantBenchmark ? (j.benchmarkPoints || null) : null);
     document.getElementById("watchlistChartMeta").innerHTML = watchlistRangeChangeHtml(points);
     statusEl.textContent = "";
   } catch (e) {
-    if (ticker !== watchlistChartTicker || range !== watchlistChartRange) return;
+    if (ticker !== watchlistChartTicker || range !== watchlistChartRange || wantBenchmark !== watchlistBenchmarkOn) return;
     statusEl.textContent = "Couldn't load a chart — " + String(e.message || e);
     statusEl.className = "watchlist-chart-status err";
   }
@@ -3204,11 +3225,47 @@ function watchlistRangeChangeHtml(points) {
     <span class="wl-change ${dir}">${sign}${changePct.toFixed(2)}%</span>`;
 }
 
+async function loadWatchlistSnapshot() {
+  const ticker = watchlistChartTicker;
+  const grid = document.getElementById("watchlistSnapshotGrid");
+  try {
+    const res = await fetch(BRIDGE + "/api/watchlist/snapshot?ticker=" + encodeURIComponent(ticker));
+    const j = await res.json();
+    if (ticker !== watchlistChartTicker) return;   // switched tickers while this was in flight
+    if (!res.ok || j.error) { grid.hidden = true; grid.innerHTML = ""; return; }
+
+    const rangeStr = (j.fiftyTwoWeekLow == null || j.fiftyTwoWeekHigh == null) ? null
+      : "$" + j.fiftyTwoWeekLow.toFixed(2) + " – $" + j.fiftyTwoWeekHigh.toFixed(2);
+    const tiles = [
+      { label: "Market Cap", value: j.marketCap == null ? null : fmtMoneyShort(j.marketCap) },
+      { label: "P/E", value: j.trailingPE == null ? null : fmtX(j.trailingPE) },
+      { label: "Div Yield", value: j.dividendYield == null ? null : j.dividendYield.toFixed(2) + "%" },
+      { label: "52-Week Range", value: rangeStr },
+      { label: "Sector", value: j.sector || null },
+    ].filter(t => t.value != null);
+
+    if (!tiles.length) { grid.hidden = true; grid.innerHTML = ""; return; }
+    grid.innerHTML = tiles.map(t => `
+      <div class="kpi"><div class="kpi-label">${t.label}</div><div class="kpi-value">${escapeHtml(String(t.value))}</div></div>
+    `).join("");
+    grid.hidden = false;
+  } catch {
+    if (ticker === watchlistChartTicker) { grid.hidden = true; grid.innerHTML = ""; }
+  }
+}
+
 document.getElementById("watchlistRangeRow").addEventListener("click", (ev) => {
   const btn = ev.target.closest("[data-range]");
   if (!btn || btn.classList.contains("is-active")) return;
   watchlistChartRange = btn.dataset.range;
   updateWatchlistRangeButtons();
+  loadWatchlistChart();
+});
+
+document.getElementById("watchlistBenchmarkToggle").addEventListener("click", (ev) => {
+  watchlistBenchmarkOn = !watchlistBenchmarkOn;
+  ev.currentTarget.classList.toggle("is-active", watchlistBenchmarkOn);
+  ev.currentTarget.setAttribute("aria-pressed", watchlistBenchmarkOn ? "true" : "false");
   loadWatchlistChart();
 });
 
@@ -3243,18 +3300,34 @@ function watchlistFullDateLabel(dateStr) {
   return timePart ? `${label} · ${timePart}` : label;
 }
 
-function renderWatchlistChart(points, range) {
+const pctFromStart = (vals) => vals.map(v => (v / vals[0] - 1) * 100);
+
+function renderWatchlistChart(points, range, benchmarkPoints) {
   const svg = document.getElementById("watchlistChartSvg");
   [...svg.childNodes].forEach(n => { if (!["title", "desc"].includes(n.nodeName)) n.remove(); });
+  const legendEl = document.getElementById("watchlistChartLegend");
   const VBw = 640, VBh = 220, padL = 54, padR = 14, padT = 14, padB = 26;
   const plotW = VBw - padL - padR, plotH = VBh - padT - padB;
-  if (!points.length) return;
+  if (!points.length) { legendEl.hidden = true; legendEl.innerHTML = ""; return; }
 
-  const closes = points.map(p => p.close);
-  const ticks = niceTicks(Math.min(...closes), Math.max(...closes), 4);
+  const hasBenchmark = !!(benchmarkPoints && benchmarkPoints.length);
+  if (!hasBenchmark) { legendEl.hidden = true; legendEl.innerHTML = ""; }
+
+  // With a benchmark, raw price is meaningless to compare (e.g. a $180 stock
+  // vs. a ~5500 index) — both series switch to % change from the start of
+  // the visible range instead.
+  const stockVals = hasBenchmark ? pctFromStart(points.map(p => p.close)) : points.map(p => p.close);
+  const benchVals = hasBenchmark ? pctFromStart(benchmarkPoints.map(p => p.close)) : null;
+
+  const allVals = hasBenchmark ? stockVals.concat(benchVals) : stockVals;
+  const ticks = niceTicks(Math.min(...allVals), Math.max(...allVals), 4);
   const yMin = ticks[0], yMax = ticks[ticks.length - 1];
-  const X = (i) => padL + (plotW * i) / (points.length - 1 || 1);
   const Y = (v) => padT + plotH - ((v - yMin) / (yMax - yMin || 1)) * plotH;
+  // Each series walks its own fractional index — both are fetched with the
+  // same period/interval so they span the same range, but exact per-
+  // timestamp alignment isn't worth the complexity at this chart size.
+  const Xfor = (len) => (i) => padL + (plotW * i) / (len - 1 || 1);
+  const Xstock = Xfor(points.length);
 
   const gGrid = el("g");
   ticks.forEach(tv => {
@@ -3263,7 +3336,7 @@ function renderWatchlistChart(points, range) {
       stroke: "#2c2c2a", "stroke-width": "1", "shape-rendering": "crispEdges" }));
     const lab = el("text", { x: padL - 8, y: y + 4, "text-anchor": "end",
       fill: "#78776f", "font-size": "10.5", "font-family": "inherit", "font-variant-numeric": "tabular-nums" });
-    lab.textContent = "$" + tv.toFixed(2);
+    lab.textContent = hasBenchmark ? (tv >= 0 ? "+" : "") + tv.toFixed(1) + "%" : "$" + tv.toFixed(2);
     gGrid.append(lab);
   });
   svg.append(gGrid);
@@ -3275,7 +3348,7 @@ function renderWatchlistChart(points, range) {
     if (label === lastAxisLabel) return; // e.g. two ticks landing in the same month
     lastAxisLabel = label;
     const anchor = i === 0 ? "start" : i === points.length - 1 ? "end" : "middle";
-    const t = el("text", { x: X(i), y: VBh - 6, "text-anchor": anchor,
+    const t = el("text", { x: Xstock(i), y: VBh - 6, "text-anchor": anchor,
       fill: "#78776f", "font-size": "10.5", "font-family": "inherit" });
     t.textContent = label;
     svg.append(t);
@@ -3286,25 +3359,42 @@ function renderWatchlistChart(points, range) {
     y1: padT, y2: padT + plotH, opacity: "0", "shape-rendering": "crispEdges" });
   svg.append(crosshair);
 
-  const d = points.map((p, i) => `${i ? "L" : "M"}${X(i).toFixed(2)},${Y(p.close).toFixed(2)}`).join(" ");
-  const linePath = el("path", { d, fill: "none", stroke: "#3987e5", "stroke-width": "2",
+  const stockD = stockVals.map((v, i) => `${i ? "L" : "M"}${Xstock(i).toFixed(2)},${Y(v).toFixed(2)}`).join(" ");
+  const stockPath = el("path", { d: stockD, fill: "none", stroke: "#3987e5", "stroke-width": "2",
     "stroke-linejoin": "round", "stroke-linecap": "round" });
-  svg.append(linePath);
-  drawLineIn(linePath);
+  svg.append(stockPath);
+  drawLineIn(stockPath);
+  svg.append(el("circle", { cx: Xstock(stockVals.length - 1), cy: Y(stockVals[stockVals.length - 1]), r: "3.5", fill: "#3987e5" }));
 
-  const lastI = points.length - 1;
-  svg.append(el("circle", { cx: X(lastI), cy: Y(points[lastI].close), r: "3.5", fill: "#3987e5" }));
+  if (hasBenchmark) {
+    const Xbench = Xfor(benchmarkPoints.length);
+    const benchD = benchVals.map((v, i) => `${i ? "L" : "M"}${Xbench(i).toFixed(2)},${Y(v).toFixed(2)}`).join(" ");
+    // No drawLineIn here — it animates via stroke-dasharray/-dashoffset, which
+    // would clobber this line's own "5 4" dash pattern (inline style wins
+    // over the SVG attribute) and make it render solid.
+    svg.append(el("path", { d: benchD, fill: "none", stroke: "#ffd966", "stroke-width": "1.6",
+      "stroke-dasharray": "5 4", "stroke-linejoin": "round", "stroke-linecap": "round" }));
+    svg.append(el("circle", { cx: Xbench(benchVals.length - 1), cy: Y(benchVals[benchVals.length - 1]), r: "3", fill: "#ffd966" }));
+
+    legendEl.innerHTML =
+      `<span class="legend-item"><span class="swatch" style="background:#3987e5"></span>${escapeHtml(watchlistChartTicker || "")}</span>
+       <span class="legend-item"><span class="swatch" style="background:#ffd966"></span>S&amp;P 500</span>`;
+    legendEl.hidden = false;
+  }
 
   // hover dot, drawn on top of the line and end marker
   svg.append(el("circle", { id: "wlCrosshairDot", r: "4.5", fill: "#3987e5",
     stroke: "#16161a", "stroke-width": "2", opacity: "0" }));
 
-  attachWatchlistHover(points, X, Y, padT, plotH);
+  // Pass the plotted (possibly %-transformed) values through so the hover
+  // dot/crosshair land at the same height as the line itself — not the raw
+  // $ price, which would be wrong once benchmark mode remaps the Y axis.
+  attachWatchlistHover(points, Xstock, Y, padT, plotH, stockVals);
 }
 
 let watchlistHoverIdx = null;
 
-function attachWatchlistHover(points, X, Y, padT, plotH) {
+function attachWatchlistHover(points, X, Y, padT, plotH, plotVals) {
   const svg = document.getElementById("watchlistChartSvg");
   const n = points.length;
   const bw = n > 1 ? (X(1) - X(0)) : 40;
@@ -3313,8 +3403,8 @@ function attachWatchlistHover(points, X, Y, padT, plotH) {
   points.forEach((p, i) => {
     const rect = el("rect", { x: X(i) - bw / 2, y: padT, width: bw, height: plotH,
       fill: "transparent", "data-hit": i });
-    rect.addEventListener("mouseenter", () => showWatchlistTooltip(i, points, X, Y));
-    rect.addEventListener("mousemove", () => showWatchlistTooltip(i, points, X, Y));
+    rect.addEventListener("mouseenter", () => showWatchlistTooltip(i, points, X, Y, plotVals));
+    rect.addEventListener("mousemove", () => showWatchlistTooltip(i, points, X, Y, plotVals));
     svg.append(rect);
   });
   svg.addEventListener("mouseleave", hideWatchlistTooltip);
@@ -3328,7 +3418,7 @@ function attachWatchlistHover(points, X, Y, padT, plotH) {
   const touchUpdate = (ev) => {
     const t = ev.touches[0] || ev.changedTouches[0];
     if (!t) return;
-    showWatchlistTooltip(pickIndexFromClientX(t.clientX), points, X, Y);
+    showWatchlistTooltip(pickIndexFromClientX(t.clientX), points, X, Y, plotVals);
   };
   svg.addEventListener("touchstart", touchUpdate, { passive: true });
   svg.addEventListener("touchmove", touchUpdate, { passive: true });
@@ -3339,22 +3429,25 @@ function attachWatchlistHover(points, X, Y, padT, plotH) {
     ev.preventDefault();
     const cur = watchlistHoverIdx === null ? 0 : watchlistHoverIdx;
     const next = Math.max(0, Math.min(n - 1, cur + (ev.key === "ArrowRight" ? 1 : -1)));
-    showWatchlistTooltip(next, points, X, Y);
+    showWatchlistTooltip(next, points, X, Y, plotVals);
   };
   svg.onblur = hideWatchlistTooltip;
 }
 
-function showWatchlistTooltip(i, points, X, Y) {
+function showWatchlistTooltip(i, points, X, Y, plotVals) {
   watchlistHoverIdx = i;
   const p = points[i];
   const svg = document.getElementById("watchlistChartSvg");
   const tip = document.getElementById("watchlistChartTooltip");
+  const plotY = Y(plotVals ? plotVals[i] : p.close);
 
   const ch = svg.querySelector("#wlCrosshair");
   if (ch) { ch.setAttribute("x1", X(i)); ch.setAttribute("x2", X(i)); ch.setAttribute("opacity", "1"); }
   const dot = svg.querySelector("#wlCrosshairDot");
-  if (dot) { dot.setAttribute("cx", X(i)); dot.setAttribute("cy", Y(p.close)); dot.setAttribute("opacity", "1"); }
+  if (dot) { dot.setAttribute("cx", X(i)); dot.setAttribute("cy", plotY); dot.setAttribute("opacity", "1"); }
 
+  // Always the real $ price in the tooltip text, even in benchmark % mode —
+  // only the dot/crosshair's vertical position follows the chart's axis.
   tip.innerHTML = `<div class="tt-year">${watchlistFullDateLabel(p.date)}</div>
     <div class="tt-row"><span class="name">Close</span><span class="val">$${p.close.toFixed(2)}</span></div>`;
   tip.classList.add("show");
@@ -3362,7 +3455,7 @@ function showWatchlistTooltip(i, points, X, Y) {
   const rect = svg.getBoundingClientRect();
   const scale = rect.width / 640;
   const cx = X(i) * scale;
-  const cy = Y(p.close) * scale;
+  const cy = plotY * scale;
   const tipW = tip.offsetWidth || 178;
   const tipH = tip.offsetHeight || 64;
 
@@ -3565,6 +3658,7 @@ const fmtMoney = (v) => !isFinite(v) ? EMDASH
 const fmtMoneyShort = (v) => {
   if (!isFinite(v)) return EMDASH;
   const sign = v < 0 ? "\u2212" : "", a = Math.abs(v);
+  if (a >= 1e12) return sign + "$" + (a / 1e12).toFixed(2) + "T";
   if (a >= 1e9) return sign + "$" + (a / 1e9).toFixed(1) + "B";
   if (a >= 1e6) return sign + "$" + (a / 1e6).toFixed(a >= 1e7 ? 0 : 1) + "M";
   if (a >= 1e3) return sign + "$" + Math.round(a / 1e3) + "k";

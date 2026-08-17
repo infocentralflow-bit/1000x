@@ -1011,6 +1011,7 @@ class Handler(BaseHTTPRequestHandler):
             qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             ticker = (qs.get("ticker") or [""])[0].strip().upper()
             range_key = (qs.get("range") or ["3mo"])[0].strip().lower()
+            want_benchmark = (qs.get("benchmark") or [""])[0] == "1"
             if not TICKER_RE.match(ticker):
                 self._json({"error": "Invalid ticker."}, 400)
                 return
@@ -1021,7 +1022,27 @@ class Handler(BaseHTTPRequestHandler):
             if err:
                 self._json({"ticker": ticker, "points": [], "error": err}, 502)
                 return
-            self._json({"ticker": ticker, "points": points, "error": None})
+            benchmark_points = None
+            if want_benchmark:
+                # The benchmark ticker is a fixed server-side constant, never
+                # client input — a failure here is soft: the chart the user
+                # actually asked for still renders even if the S&P 500 leg
+                # doesn't come back.
+                bench_points, bench_err = quotes_service.fetch_history(
+                    quotes_service.BENCHMARK_TICKER, range_key)
+                if not bench_err:
+                    benchmark_points = bench_points
+            self._json({"ticker": ticker, "points": points, "benchmarkPoints": benchmark_points, "error": None})
+            return
+
+        if path == "/api/watchlist/snapshot":
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            ticker = (qs.get("ticker") or [""])[0].strip().upper()
+            if not TICKER_RE.match(ticker):
+                self._json({"error": "Invalid ticker."}, 400)
+                return
+            snap = quotes_service.fetch_snapshot(ticker)
+            self._json(snap, 502 if snap.get("error") else 200)
             return
 
         if path == "/api/notion/databases":
