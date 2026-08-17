@@ -750,8 +750,9 @@ textarea.notion-notes:not([disabled]):placeholder-shown { background: var(--gold
 .tooltip .tt-row .val { margin-left: auto; font-weight: 650; font-variant-numeric: tabular-nums; color: var(--text-primary); }
 
 /* Watchlist chart tooltip: smaller and translucent (frosted, not opaque) so
-   the line stays visible underneath instead of getting blotted out. */
-#watchlistChartTooltip {
+   the line stays visible underneath instead of getting blotted out. The
+   drag-to-select range label shares the same compact frosted look. */
+#watchlistChartTooltip, #watchlistChartSelection {
   min-width: 0;
   padding: 7px 10px;
   background: rgba(10,10,12,.62);
@@ -759,10 +760,13 @@ textarea.notion-notes:not([disabled]):placeholder-shown { background: var(--gold
   -webkit-backdrop-filter: blur(5px);
   font-size: 11px;
 }
-#watchlistChartTooltip .tt-year {
+#watchlistChartTooltip .tt-year, #watchlistChartSelection .tt-year {
   font-size: 10px; padding-bottom: 4px; margin-bottom: 4px;
 }
-#watchlistChartTooltip .tt-row { padding: 1px 0; gap: 14px; }
+#watchlistChartTooltip .tt-row, #watchlistChartSelection .tt-row { padding: 1px 0; gap: 14px; }
+/* Suppress the browser's own touch-scroll/zoom on the chart so a drag
+   gesture always draws a selection instead of panning the page. */
+#watchlistChartSvg { touch-action: none; }
 
 /* ── Tables ──────────────────────────────────────────────────────────────── */
 .table-scroll { overflow-x: auto; }
@@ -1572,6 +1576,7 @@ footer.legal code {
           <title id="watchlistChartSvgTitle">Price chart</title>
         </svg>
         <div id="watchlistChartTooltip" class="tooltip" role="status" aria-live="polite"></div>
+        <div id="watchlistChartSelection" class="tooltip" role="status" aria-live="polite"></div>
       </div>
       <div class="chart-legend" id="watchlistChartLegend" hidden></div>
       <div class="watchlist-chart-status" id="watchlistChartStatus"></div>
@@ -3161,6 +3166,12 @@ watchlistAddInput.addEventListener("blur", () => {
 let watchlistChartTicker = null;
 let watchlistChartRange = "3mo";
 let watchlistBenchmarkOn = false;
+// Drag-to-select a range on the chart (like Wealthsimple's chart interaction) —
+// start/end are point indices into the currently-rendered `points` array, or
+// null when nothing is selected. Set by attachWatchlistDragSelect().
+let watchlistSelStart = null;
+let watchlistSelEnd = null;
+let watchlistDragging = false;
 
 function openWatchlistChart(ticker) {
   watchlistChartTicker = ticker;
@@ -3303,9 +3314,20 @@ function watchlistFullDateLabel(dateStr) {
 const pctFromStart = (vals) => vals.map(v => (v / vals[0] - 1) * 100);
 
 function renderWatchlistChart(points, range, benchmarkPoints) {
-  const svg = document.getElementById("watchlistChartSvg");
+  // attachWatchlistHover/attachWatchlistDragSelect both add listeners
+  // straight to the <svg> element (not its children), and this function
+  // runs on every range switch, benchmark toggle, and ticker open without
+  // ever removing them — cloning the node is the standard way to drop every
+  // previously-attached listener in one shot, since the clone starts blank.
+  // Without this, old listener sets pile up and keep firing on stale data,
+  // which is exactly the kind of thing that corrupts drag-selection state.
+  let svg = document.getElementById("watchlistChartSvg");
+  const freshSvg = svg.cloneNode(true);
+  svg.replaceWith(freshSvg);
+  svg = freshSvg;
   [...svg.childNodes].forEach(n => { if (!["title", "desc"].includes(n.nodeName)) n.remove(); });
   const legendEl = document.getElementById("watchlistChartLegend");
+  clearWatchlistSelection(); // new data — any old selection's indices no longer mean anything
   const VBw = 640, VBh = 220, padL = 54, padR = 14, padT = 14, padB = 26;
   const plotW = VBw - padL - padR, plotH = VBh - padT - padB;
   if (!points.length) { legendEl.hidden = true; legendEl.innerHTML = ""; return; }
@@ -3382,6 +3404,23 @@ function renderWatchlistChart(points, range, benchmarkPoints) {
     legendEl.hidden = false;
   }
 
+  // Drag-to-select range overlay: two boundary lines, a dashed baseline from
+  // the start point, and a dot at each end. Created hidden (opacity 0) and
+  // just moved/shown by updateWatchlistSelection() during a drag — same
+  // create-once-then-reposition pattern as the crosshair/hover dot above.
+  const gSel = el("g", { id: "wlSelGroup" });
+  gSel.append(
+    el("line", { id: "wlSelLine1", stroke: "#78776f", "stroke-width": "1",
+      y1: padT, y2: padT + plotH, opacity: "0", "shape-rendering": "crispEdges" }),
+    el("line", { id: "wlSelLine2", stroke: "#78776f", "stroke-width": "1",
+      y1: padT, y2: padT + plotH, opacity: "0", "shape-rendering": "crispEdges" }),
+    el("line", { id: "wlSelBaseline", stroke: "#78776f", "stroke-width": "1",
+      "stroke-dasharray": "3 3", opacity: "0", "shape-rendering": "crispEdges" }),
+    el("circle", { id: "wlSelDotStart", r: "3.5", stroke: "#16161a", "stroke-width": "1.5", opacity: "0" }),
+    el("circle", { id: "wlSelDotEnd", r: "3.5", stroke: "#16161a", "stroke-width": "1.5", opacity: "0" }),
+  );
+  svg.append(gSel);
+
   // hover dot, drawn on top of the line and end marker
   svg.append(el("circle", { id: "wlCrosshairDot", r: "4.5", fill: "#3987e5",
     stroke: "#16161a", "stroke-width": "2", opacity: "0" }));
@@ -3390,6 +3429,7 @@ function renderWatchlistChart(points, range, benchmarkPoints) {
   // dot/crosshair land at the same height as the line itself — not the raw
   // $ price, which would be wrong once benchmark mode remaps the Y axis.
   attachWatchlistHover(points, Xstock, Y, padT, plotH, stockVals);
+  attachWatchlistDragSelect(points, Xstock, Y, padT, plotH, stockVals);
 }
 
 let watchlistHoverIdx = null;
@@ -3435,6 +3475,11 @@ function attachWatchlistHover(points, X, Y, padT, plotH, plotVals) {
 }
 
 function showWatchlistTooltip(i, points, X, Y, plotVals) {
+  // A drag is in progress, or a range selection is frozen on screen — either
+  // way the single-point tooltip/crosshair would just fight the selection
+  // overlay for the same space. Tapping anywhere clears the selection
+  // (attachWatchlistDragSelect's pointerdown handler) and hover resumes.
+  if (watchlistDragging || watchlistSelStart !== null) return;
   watchlistHoverIdx = i;
   const p = points[i];
   const svg = document.getElementById("watchlistChartSvg");
@@ -3479,6 +3524,114 @@ function hideWatchlistTooltip() {
   if (ch) ch.setAttribute("opacity", "0");
   const dot = svg.querySelector("#wlCrosshairDot");
   if (dot) dot.setAttribute("opacity", "0");
+}
+
+/* ── Watchlist chart: drag to select a range ──────────────────────────────
+   Press (mouse or touch) and drag across the chart to see the $ / % change
+   between two points — two boundary lines, a dashed baseline from the start
+   point, and a floating label, all frozen in place once you release. Any
+   new press elsewhere clears it and starts over; a press with no real
+   movement is just a tap, so it clears the selection and falls through to
+   the normal single-point hover instead. */
+function attachWatchlistDragSelect(points, X, Y, padT, plotH, plotVals) {
+  const svg = document.getElementById("watchlistChartSvg");
+  const n = points.length;
+  if (n < 2) return; // nothing to span a range across
+  const bw = n > 1 ? (X(1) - X(0)) : 40;
+
+  const pickIndexFromClientX = (clientX) => {
+    const rect = svg.getBoundingClientRect();
+    const scale = rect.width / 640;
+    const localX = (clientX - rect.left) / scale;
+    return Math.max(0, Math.min(n - 1, Math.round((localX - X(0)) / (bw || 1))));
+  };
+
+  let anchorIdx = null;
+
+  svg.addEventListener("pointerdown", (ev) => {
+    anchorIdx = pickIndexFromClientX(ev.clientX);
+    watchlistDragging = false;
+    clearWatchlistSelection(); // starting a fresh gesture always dismisses any frozen one
+    svg.setPointerCapture(ev.pointerId);
+  });
+
+  svg.addEventListener("pointermove", (ev) => {
+    if (anchorIdx === null) return;
+    const idx = pickIndexFromClientX(ev.clientX);
+    if (!watchlistDragging && idx === anchorIdx) return; // hasn't left the starting point yet
+    watchlistDragging = true;
+    hideWatchlistTooltip();
+    updateWatchlistSelection(Math.min(anchorIdx, idx), Math.max(anchorIdx, idx), points, X, Y, plotVals);
+  });
+
+  const onRelease = () => {
+    if (!watchlistDragging) clearWatchlistSelection(); // just a tap — nothing to freeze
+    anchorIdx = null;
+    watchlistDragging = false;
+  };
+  svg.addEventListener("pointerup", onRelease);
+  svg.addEventListener("pointercancel", onRelease);
+}
+
+function updateWatchlistSelection(startIdx, endIdx, points, X, Y, plotVals) {
+  watchlistSelStart = startIdx;
+  watchlistSelEnd = endIdx;
+  const svg = document.getElementById("watchlistChartSvg");
+  const line1 = svg.querySelector("#wlSelLine1"), line2 = svg.querySelector("#wlSelLine2");
+  const baseline = svg.querySelector("#wlSelBaseline");
+  const dotStart = svg.querySelector("#wlSelDotStart"), dotEnd = svg.querySelector("#wlSelDotEnd");
+  if (!line1 || !line2 || !baseline || !dotStart || !dotEnd) return;
+
+  const x1 = X(startIdx), x2 = X(endIdx);
+  const y1 = Y(plotVals[startIdx]), y2 = Y(plotVals[endIdx]);
+  const startPrice = points[startIdx].close, endPrice = points[endIdx].close;
+  const change = endPrice - startPrice;
+  const changePct = startPrice ? (change / startPrice * 100) : 0;
+  const dir = change > 0 ? "up" : change < 0 ? "down" : "flat";
+  const color = dir === "up" ? "#35c294" : dir === "down" ? "#ff8f8f" : "#78776f";
+
+  line1.setAttribute("x1", x1); line1.setAttribute("x2", x1); line1.setAttribute("opacity", "1");
+  line2.setAttribute("x1", x2); line2.setAttribute("x2", x2); line2.setAttribute("opacity", "1");
+  baseline.setAttribute("x1", x1); baseline.setAttribute("x2", x2);
+  baseline.setAttribute("y1", y1); baseline.setAttribute("y2", y1);
+  baseline.setAttribute("opacity", "1");
+  dotStart.setAttribute("cx", x1); dotStart.setAttribute("cy", y1);
+  dotStart.setAttribute("fill", color); dotStart.setAttribute("opacity", "1");
+  dotEnd.setAttribute("cx", x2); dotEnd.setAttribute("cy", y2);
+  dotEnd.setAttribute("fill", color); dotEnd.setAttribute("opacity", "1");
+
+  const label = document.getElementById("watchlistChartSelection");
+  const sign = change > 0 ? "+" : change < 0 ? "−" : "";
+  label.innerHTML = `<div class="tt-year">${watchlistFullDateLabel(points[startIdx].date)} – ${watchlistFullDateLabel(points[endIdx].date)}</div>
+    <div class="tt-row"><span class="name">Change</span><span class="val" style="color:${color}">${sign}$${Math.abs(change).toFixed(2)} (${sign}${Math.abs(changePct).toFixed(2)}%)</span></div>`;
+  label.classList.add("show");
+
+  // Same top/bottom placement logic as the single-point tooltip — anchored
+  // on the midpoint between the two selected points instead of one point.
+  const rect = svg.getBoundingClientRect();
+  const scale = rect.width / 640;
+  const midX = ((x1 + x2) / 2) * scale;
+  const midY = ((y1 + y2) / 2) * scale;
+  const labelW = label.offsetWidth || 178;
+  const labelH = label.offsetHeight || 50;
+  const left = Math.min(Math.max(midX - labelW / 2, 8), rect.width - labelW - 8);
+  const top = midY < rect.height / 2
+    ? Math.min(midY + 16, rect.height - labelH - 8)
+    : Math.max(midY - labelH - 16, 8);
+  label.style.left = left + "px";
+  label.style.top = top + "px";
+}
+
+function clearWatchlistSelection() {
+  watchlistSelStart = null;
+  watchlistSelEnd = null;
+  const svg = document.getElementById("watchlistChartSvg");
+  ["wlSelLine1", "wlSelLine2", "wlSelBaseline", "wlSelDotStart", "wlSelDotEnd"].forEach(id => {
+    const node = svg && svg.querySelector("#" + id);
+    if (node) node.setAttribute("opacity", "0");
+  });
+  const label = document.getElementById("watchlistChartSelection");
+  if (label) label.classList.remove("show");
 }
 
 function applyCompany(d, src) {
