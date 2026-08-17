@@ -294,7 +294,11 @@ A short-list strip under the top bar with a live price and day change per ticker
 key needed, no separate setup. Needs the bridge (same as everything else that talks to a
 server), so it stays hidden if you open `dashboard.html` standalone.
 
-- Tap **+** to add a ticker, **×** on a chip to remove one.
+- **Look up any ticker** — the search box at the left of the bar (magnifying-glass icon) opens
+  the same price chart and stats for any symbol, whether or not it's on your saved list. A
+  **+ Watchlist** button appears next to the ticker name if it isn't tracked yet, so you can
+  save what you found without a separate step.
+- Tap **+** to add a ticker straight to the list, **×** on a chip to remove one.
 - Click a chip's ticker/price to open a price chart for it, with a range picker —
   **1D, 5D, 1M, 3M, 6M, 1Y, YTD** (1D/5D use intraday bars, everything else daily closes).
   Fetched on demand per range, not cached or pre-fetched — only requested when you actually
