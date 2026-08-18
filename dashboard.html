@@ -889,8 +889,8 @@ td.cellinput { padding: 4px 6px; }
 /* Watchlist chip: brief tint when a price moves between polls. */
 @keyframes wl-pulse-up   { 0% { background: rgba(53,194,148,.28); } 100% { background: transparent; } }
 @keyframes wl-pulse-down { 0% { background: rgba(255,143,143,.28); } 100% { background: transparent; } }
-.watchlist-chip.wl-pulse-up   { animation: wl-pulse-up   .9s var(--ease); }
-.watchlist-chip.wl-pulse-down { animation: wl-pulse-down .9s var(--ease); }
+.watchlist-chip.wl-pulse-up,   .mover-row.wl-pulse-up   { animation: wl-pulse-up   .9s var(--ease); }
+.watchlist-chip.wl-pulse-down, .mover-row.wl-pulse-down { animation: wl-pulse-down .9s var(--ease); }
 
 /* A brief ring on whatever the user just successfully acted on — Save,
    Sync to Notion, a newly-added watchlist ticker — spatially anchoring the
@@ -1061,8 +1061,118 @@ footer.legal code {
   #calcChart { min-width: 660px; }
 }
 
+/* ── Home dashboard (HUD) ──────────────────────────────────────────────────
+   Everything here is a CSS keyframe/transition so the global reduced-motion
+   kill-switch below neuters it for free. The one JS-driven effect on this
+   screen (animateNumber) does its own matchMedia check. No new hues — only
+   the existing gold/hairline/warn tokens and the #35c294/#ff8f8f gain/loss
+   pair already used by the watchlist. */
+#viewHome { position: relative; }
+
+/* Corner brackets. Top-left and bottom-right only — four corners reads busy. */
+.hud-frame { position: relative; }
+.hud-frame::before, .hud-frame::after {
+  content: ""; position: absolute; width: 14px; height: 14px;
+  border-color: var(--gold-dim); border-style: solid; border-width: 0;
+  opacity: .55; pointer-events: none;
+  animation: hud-bracket-in .38s var(--ease) both;
+}
+.hud-frame::before { top: 7px;    left: 7px;   border-top-width: 1px;    border-left-width: 1px; }
+.hud-frame::after  { bottom: 7px; right: 7px;  border-bottom-width: 1px; border-right-width: 1px; }
+@keyframes hud-bracket-in { from { opacity: 0; transform: scale(.86); } to { opacity: .55; transform: none; } }
+
+/* One-shot scan sweep during boot. z-index stays under the sticky topbar (40). */
+#viewHome.is-booting::after {
+  content: ""; position: absolute; inset: 0 0 auto; height: 150px; z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(180deg, transparent, var(--gold-glow) 48%, transparent);
+  animation: hud-scan 900ms var(--ease) both;
+}
+@keyframes hud-scan {
+  0%   { transform: translateY(-170px); opacity: 0; }
+  12%  { opacity: 1; }
+  85%  { opacity: .5; }
+  100% { transform: translateY(var(--home-h, 900px)); opacity: 0; }
+}
+
+.home-hud {
+  position: relative;
+  padding: 20px 20px 18px; margin-bottom: 18px;
+  background: linear-gradient(180deg, var(--surface-2), var(--surface-1));
+  border: 1px solid var(--hairline); border-radius: var(--r-lg);
+  box-shadow: var(--shadow-card);
+}
+.home-hud::before {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px;
+  background: linear-gradient(90deg, var(--gold-dim), var(--hairline) 55%, transparent);
+  transform-origin: left center;
+  animation: hud-boot-line 520ms var(--ease) both;
+}
+@keyframes hud-boot-line { from { transform: scaleX(0); opacity: 0; } to { transform: scaleX(1); opacity: 1; } }
+.hud-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; flex-wrap: wrap; }
+.hud-greet { margin: 0; font-size: 22px; font-weight: 650; letter-spacing: -.01em; }
+.hud-date { margin-top: 3px; font-size: 12.5px; color: var(--text-muted); }
+.hud-status { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.hud-stat { display: inline-flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--text-secondary); }
+.hud-stat b { font-weight: 650; letter-spacing: .04em; color: var(--text-primary); }
+.hud-stat .hud-detail { color: var(--text-muted); }
+.hud-pip { width: 6px; height: 6px; border-radius: 50%; background: var(--text-muted); flex: none; }
+.hud-pip.is-live { background: var(--gold); box-shadow: 0 0 6px var(--gold-glow); animation: hud-pip-blink 2.4s var(--ease) infinite; }
+.hud-pip.is-warn { background: var(--warn); }
+@keyframes hud-pip-blink { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+.hud-since {
+  margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--hairline);
+  font-size: 12px; color: var(--text-secondary);
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+}
+.hud-since .since-label { color: var(--text-muted); }
+.hud-since .up { color: #35c294; }
+.hud-since .down { color: #ff8f8f; }
+
+/* Live-ticking figures only. Static display numbers keep proportional figures
+   (see the note at .kpi-value) — but a value that re-renders every 45s jitters
+   badly without tabular-nums, which is the worse of the two problems. */
+.hud-readout { font-variant-numeric: tabular-nums; letter-spacing: -.3px; }
+
+.home-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.home-panel { margin: 0; }
+.home-panel.span-2 { grid-column: 1 / -1; }
+/* Explicit --d delays rather than :nth-child (which is order-coupled). The
+   :not(.is-booting) rule is what keeps the reveal to once per page load. */
+#viewHome.is-booting .home-panel { animation: rise .5s var(--ease) both; animation-delay: var(--d, 0s); }
+#viewHome:not(.is-booting) .home-panel { animation: none; }
+
+.mover-row {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 9px 11px; margin-bottom: 6px;
+  background: none; border: 1px solid var(--hairline); border-radius: var(--r-sm);
+  font: inherit; color: inherit; text-align: left; cursor: pointer;
+  transition: border-color .15s var(--ease), background .15s var(--ease);
+}
+.mover-row:last-child { margin-bottom: 0; }
+@media (hover: hover) and (pointer: fine) {
+  .mover-row:hover { border-color: rgba(255,217,102,.32); background: var(--surface-2); }
+}
+.mover-row:focus-visible { outline: 2px solid var(--gold-dim); outline-offset: 1px; }
+.mover-sym { font-size: 12.5px; font-weight: 700; letter-spacing: .02em; flex: none; min-width: 52px; }
+.mover-name { font-size: 11px; color: var(--text-muted); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mover-price { font-size: 12.5px; font-weight: 600; color: var(--text-secondary); flex: none; }
+
+.home-cta { margin-top: 12px; }
+
+@media (max-width: 760px) {
+  .home-grid { grid-template-columns: minmax(0, 1fr); }
+  .home-panel.span-2 { grid-column: auto; }
+  .hud-top { flex-direction: column; gap: 12px; }
+  .hud-greet { font-size: 19px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  /* The rule above collapses the sweep to .01ms, which reads as a flash
+     rather than a sweep — suppress it outright instead. */
+  #viewHome.is-booting::after { display: none; }
+  .hud-pip.is-live { animation: none; }
 }
 @media (max-width: 720px) {
   .app { padding: 14px 13px 48px; }
@@ -1113,6 +1223,16 @@ footer.legal code {
         </svg>
       </button>
       <div id="productMenu" class="product-menu" role="menu" aria-labelledby="btnProduct" hidden>
+        <button class="product-item" role="menuitem" data-view="home">
+          <span class="pm-mark" style="background:linear-gradient(145deg,var(--gold),#8f7526);color:#221c05">HM</span>
+          <span>
+            <span class="pm-name">Dashboard</span>
+            <span class="pm-sub">Everything at a glance</span>
+          </span>
+          <svg class="pm-check" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M3 8.5 6.5 12 13 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
         <button class="product-item" role="menuitem" data-view="projection" aria-current="true">
           <span class="pm-mark" style="background:linear-gradient(145deg,var(--gold),#8f7526);color:#221c05">FP</span>
           <span>
@@ -1219,6 +1339,54 @@ footer.legal code {
         autocomplete="off" spellcheck="false" placeholder="Ticker" aria-label="Add ticker to watchlist">
     </form>
     <button type="button" id="btnWatchlistAdd" class="watchlist-add-btn" title="Add a ticker to your watchlist" aria-label="Add ticker">+</button>
+  </div>
+
+  <!-- ── Home dashboard ──────────────────────────────────────────────────── -->
+  <div id="viewHome" hidden>
+    <section class="home-hud hud-frame">
+      <div class="hud-top">
+        <div>
+          <h2 class="hud-greet" id="hudGreet">Good morning.</h2>
+          <div class="hud-date" id="hudDate"></div>
+        </div>
+        <div class="hud-status" id="hudStatus"></div>
+      </div>
+      <div class="hud-since" id="hudSince" hidden></div>
+    </section>
+
+    <div class="home-grid">
+      <section class="home-panel card hud-frame span-2" id="homePortfolioPanel" style="--d:.06s">
+        <div class="card-head">
+          <h3>Portfolio</h3>
+          <span class="sub" id="homePortfolioSub"></span>
+        </div>
+        <div class="card-body" id="homePortfolioBody"></div>
+      </section>
+
+      <section class="home-panel card hud-frame" id="homeMoversPanel" style="--d:.12s">
+        <div class="card-head">
+          <h3>Movers</h3>
+          <span class="sub" id="homeMoversSub"></span>
+        </div>
+        <div class="card-body" id="homeMoversBody"></div>
+      </section>
+
+      <section class="home-panel card hud-frame" id="homeNetWorthPanel" style="--d:.18s">
+        <div class="card-head">
+          <h3>Net Worth</h3>
+          <span class="sub" id="homeNetWorthSub"></span>
+        </div>
+        <div class="card-body" id="homeNetWorthBody"></div>
+      </section>
+
+      <section class="home-panel card hud-frame span-2" id="homeProjectsPanel" style="--d:.24s">
+        <div class="card-head">
+          <h3>Recent Projections</h3>
+          <span class="sub" id="homeProjectsSub"></span>
+        </div>
+        <div class="card-body" id="homeProjectsBody"></div>
+      </section>
+    </div>
   </div>
 
   <div id="viewProjection">
@@ -3402,6 +3570,9 @@ function applyWatchlistResult(j) {
   watchlistQuoteMap = {};
   (j.quotes || []).forEach(q => { watchlistQuoteMap[q.ticker] = q; });
   renderWatchlist(prevQuoteMap);
+  // The watchlist's own 60s poll also refreshes the Home movers panel, so the
+  // two never drift apart between Home's slower 45s ticks.
+  if (currentView === "home") renderHomeMovers(prevQuoteMap);
 }
 
 async function loadWatchlist() {
@@ -5208,6 +5379,11 @@ function onCalcInput(ev) {
 /* ── Product switcher ───────────────────────────────────────────────────── */
 const VIEW_KEY = "projectionModel.view.v1";
 const PORTFOLIO_KEY = "projectionModel.portfolio.v1";
+/* Set the first time any view is shown. Its absence — not VIEW_KEY's — is what
+   marks an install that has never seen the Dashboard, so existing installs
+   (which already have VIEW_KEY set) still get exactly one trip through it. */
+const HOME_SEEN_KEY = "projectionModel.homeSeen.v1";
+const HOME_SNAPSHOT_KEY = "projectionModel.homeSnapshot.v1";
 
 let portfolioPositions = [];
 
@@ -5306,6 +5482,51 @@ function pctChg(price, avgCost) {
   return (price - avgCost) / avgCost * 100;
 }
 
+/* Quotes for the live rows of a position list. Split out of renderPortfolio()
+   so the Home dashboard can compute the same figures without triggering the
+   Portfolio view's heavier snapshot fan-out. A quote failure is soft: the
+   caller degrades per-row rather than losing the whole table. */
+async function fetchPortfolioQuotes(positions) {
+  const liveRows = positions.filter(p => p.kind === "live");
+  const quoteMap = {};
+  if (!liveRows.length) return quoteMap;
+  const abort = new AbortController();
+  const abortTimer = setTimeout(() => abort.abort(), 12000);
+  try {
+    const quotes = await fetch("/api/watchlist?tickers=" + liveRows.map(p => p.ticker).join(","),
+      { signal: abort.signal }).then(r => r.json());
+    (quotes.quotes || []).forEach(q => { quoteMap[q.ticker] = q; });
+  } catch { /* live rows degrade below, not a hard failure for the whole table */ }
+  finally { clearTimeout(abortTimer); }
+  return quoteMap;
+}
+
+/* Pure: (positions, quoteMap) -> per-row values and totals. Shared by the
+   Portfolio table and the Home snapshot so the two can never disagree.
+   `grandTotal` deliberately sums across currencies without FX conversion —
+   the same approximation the Holdings donut uses, so table and chart agree. */
+function computePortfolioValues(positions, quoteMap) {
+  const totals = {};
+  const computed = [];
+  positions.forEach(pos => {
+    let price, value, ccy;
+    if (pos.kind === "live") {
+      const q = quoteMap[pos.ticker];
+      price = q && q.price ? q.price : 0;
+      value = price * pos.shares;
+      ccy = "USD";
+    } else {
+      price = pos.staticPrice;
+      value = pos.staticValue;
+      ccy = pos.staticCurrency;
+    }
+    totals[ccy] = (totals[ccy] || 0) + value;
+    computed.push({ pos, price, value, ccy });
+  });
+  const grandTotal = computed.reduce((s, c) => s + c.value, 0);
+  return { totals, computed, grandTotal };
+}
+
 async function renderPortfolio() {
   const table = document.getElementById("portfolioTable");
   const tbody = document.getElementById("portfolioBody");
@@ -5326,20 +5547,12 @@ async function renderPortfolio() {
   empty.hidden = true;
   tableWrap.hidden = false;
 
-  const liveRows = portfolioPositions.filter(p => p.kind === "live");
-  let quoteMap = {};
-  if (liveRows.length) {
-    const abort = new AbortController();
-    const abortTimer = setTimeout(() => abort.abort(), 12000);
-    try {
-      const quotes = await fetch("/api/watchlist?tickers=" + liveRows.map(p => p.ticker).join(","), { signal: abort.signal }).then(r => r.json());
-      (quotes.quotes || []).forEach(q => { quoteMap[q.ticker] = q; });
-    } catch { /* live rows degrade to $0.00 below, not a hard failure for the whole table */ }
-    finally { clearTimeout(abortTimer); }
-  }
+  const quoteMap = await fetchPortfolioQuotes(portfolioPositions);
 
   // Fetched once per unique non-cash ticker, shared between the P/E columns
   // below and the Industry Breakdown donut — avoids a duplicate round-trip.
+  // Deliberately NOT hoisted into the shared helpers above: the Home dashboard
+  // needs neither sectors nor P/E, and shouldn't pay for this per-ticker fan-out.
   const snapTickers = [...new Set(portfolioPositions.filter(p => p.kind !== "cash").map(p => p.ticker))];
   const snapshotMap = {};
   await Promise.all(snapTickers.map(async t => {
@@ -5348,27 +5561,7 @@ async function renderPortfolio() {
     } catch { snapshotMap[t] = null; }
   }));
 
-  const totals = {};
-  const computed = []; // {pos, price, value, ccy} — first pass, needed before we know the combined grand total
-  portfolioPositions.forEach(pos => {
-    let price, value, ccy;
-    if (pos.kind === "live") {
-      const q = quoteMap[pos.ticker];
-      price = q && q.price ? q.price : 0;
-      value = price * pos.shares;
-      ccy = "USD";
-    } else {
-      price = pos.staticPrice;
-      value = pos.staticValue;
-      ccy = pos.staticCurrency;
-    }
-    totals[ccy] = (totals[ccy] || 0) + value;
-    computed.push({ pos, price, value, ccy });
-  });
-
-  // Combined across currencies without FX conversion — same approximation
-  // used by the Holdings donut, so the table and chart agree with each other.
-  const grandTotal = computed.reduce((s, c) => s + c.value, 0);
+  const { totals, computed, grandTotal } = computePortfolioValues(portfolioPositions, quoteMap);
   const positionValues = computed.map(c => ({ label: c.pos.displayLabel, value: c.value, ticker: c.pos.ticker, kind: c.pos.kind }));
 
   let rows = "";
@@ -5555,7 +5748,464 @@ function renderPortfolioDonuts(positionValues, snapshotMap, mixedCurrencies) {
   renderDonutChart("portfolioIndustryDonut", "portfolioIndustryLegend", topSlicesWithOther(sectorEntries));
 }
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   Home dashboard.
+
+   Reads whatever the other four products already hold in memory — it never
+   calls renderPortfolio()/renderNW()/renderCalculator(), which are async and
+   re-fetch on every call. Its own quote poll covers the union of the watchlist
+   and the live portfolio rows in a single request.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+const HOME_POLL_MS = 45000;   // offset from initWatchlist's 60s so the two polls don't phase-lock
+const HOME_VISIT_GAP_MS = 15 * 60 * 1000;
+const HOME_SNAPSHOT_MIN_WRITE_MS = 60000;
+
+let homePollTimer = null, homeClockTimer = null;
+let homeQuoteMap = {};
+let homeLastSyncAt = 0;
+let homePrevTotal = NaN;
+let homePrevSnapshot;          // undefined = not yet read; null = none stored
+let homeSnapshotWrittenAt = 0;
+let homeRevealDone = false;
+
+/* Built once — constructing an Intl.DateTimeFormat per tick is measurably
+   expensive, and this one runs every 30 seconds. */
+const NY_PARTS = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York", weekday: "short",
+  year: "numeric", month: "2-digit", day: "2-digit",
+  hour: "2-digit", minute: "2-digit", hour12: false,
+});
+
+/* NYSE closures. Hardcoded because the status strip's whole job is to look
+   authoritative — claiming MARKET OPEN at 10am on Thanksgiving would undermine
+   every other number on the screen. Bounded by MARKET_CAL_THROUGH so that when
+   this table goes stale it degrades to plain weekday/hours logic (today's
+   accepted behaviour) rather than to a confident lie. Renew when convenient. */
+const MARKET_HOLIDAYS = {
+  "2026-01-01": "New Year's Day",      "2026-01-19": "M.L.K. Jr. Day",
+  "2026-02-16": "Presidents' Day",     "2026-04-03": "Good Friday",
+  "2026-05-25": "Memorial Day",        "2026-06-19": "Juneteenth",
+  "2026-07-03": "Independence Day",    "2026-09-07": "Labor Day",
+  "2026-11-26": "Thanksgiving",        "2026-12-25": "Christmas",
+  "2027-01-01": "New Year's Day",      "2027-01-18": "M.L.K. Jr. Day",
+  "2027-02-15": "Presidents' Day",     "2027-03-26": "Good Friday",
+  "2027-05-31": "Memorial Day",        "2027-06-18": "Juneteenth",
+  "2027-07-05": "Independence Day",    "2027-09-06": "Labor Day",
+  "2027-11-25": "Thanksgiving",        "2027-12-24": "Christmas",
+};
+const MARKET_HALF_DAYS = new Set(["2026-11-27", "2026-12-24", "2027-11-26"]);
+const MARKET_CAL_THROUGH = "2027-12-31";
+
+function etNow(now) {
+  const p = {};
+  NY_PARTS.formatToParts(now).forEach(x => { p[x.type] = x.value; });
+  return {
+    date: `${p.year}-${p.month}-${p.day}`,
+    weekday: p.weekday,
+    mins: (+p.hour % 24) * 60 + (+p.minute),
+  };
+}
+
+function hhmm(mins) {
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return h + "h " + String(m).padStart(2, "0") + "m";
+}
+
+function marketStatus(now = new Date()) {
+  const { date, weekday, mins } = etNow(now);
+  if (weekday === "Sat" || weekday === "Sun") return { state: "weekend", label: "MARKET CLOSED", detail: "Weekend" };
+  if (date <= MARKET_CAL_THROUGH && MARKET_HOLIDAYS[date]) {
+    return { state: "holiday", label: "MARKET CLOSED", detail: MARKET_HOLIDAYS[date] };
+  }
+  const close = (date <= MARKET_CAL_THROUGH && MARKET_HALF_DAYS.has(date)) ? 780 : 960;
+  if (mins >= 570 && mins < close) return { state: "open", label: "MARKET OPEN", detail: "closes in " + hhmm(close - mins) };
+  if (mins >= 240 && mins < 570) return { state: "premarket", label: "PRE-MARKET", detail: "opens in " + hhmm(570 - mins) };
+  if (mins >= close && mins < 1200) return { state: "afterhours", label: "AFTER HOURS", detail: "closed at " + (close === 780 ? "1:00pm" : "4:00pm") };
+  return { state: "closed", label: "MARKET CLOSED", detail: mins < 240 ? "opens in " + hhmm(570 - mins) : "opens tomorrow" };
+}
+
+/* Local hour, not ET — the greeting is about the person, the market status is
+   about the market. */
+function greetingFor(d = new Date()) {
+  const h = d.getHours();
+  if (h < 5) return "Still up.";
+  if (h < 12) return "Good morning.";
+  if (h < 18) return "Good afternoon.";
+  if (h < 22) return "Good evening.";
+  return "Working late.";
+}
+
+function renderHomeStatus() {
+  const now = new Date();
+  document.getElementById("hudGreet").textContent = greetingFor(now);
+  document.getElementById("hudDate").textContent =
+    now.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
+
+  const mkt = marketStatus(now);
+  const pipClass = mkt.state === "open" ? " is-live" : (mkt.state === "premarket" || mkt.state === "afterhours") ? " is-warn" : "";
+  const sync = homeLastSyncAt ? relTime(homeLastSyncAt) : "—";
+  document.getElementById("hudStatus").innerHTML = `
+    <span class="hud-stat"><span class="hud-pip${bridgeUp ? " is-live" : ""}"></span><b>${bridgeUp ? "BRIDGE ONLINE" : "BRIDGE OFFLINE"}</b></span>
+    <span class="hud-stat"><span class="hud-pip${pipClass}"></span><b>${mkt.label}</b><span class="hud-detail">${escapeHtml(mkt.detail)}</span></span>
+    <span class="hud-stat"><span class="hud-pip"></span><b>SYNC</b><span class="hud-detail">${escapeHtml(sync)}</span></span>`;
+}
+
+function readHomeSnapshot() {
+  try {
+    const raw = localStorage.getItem(HOME_SNAPSHOT_KEY);
+    const s = raw ? JSON.parse(raw) : null;
+    return (s && typeof s === "object" && s.savedAt) ? s : null;
+  } catch { return null; }
+}
+
+function writeHomeSnapshot(quoteMap, grandTotal) {
+  const now = Date.now();
+  if (now - homeSnapshotWrittenAt < HOME_SNAPSHOT_MIN_WRITE_MS) return;
+  const prices = {};
+  Object.keys(quoteMap || {}).forEach(t => {
+    const q = quoteMap[t];
+    if (q && !q.error && isFinite(q.price)) prices[t] = q.price;
+  });
+  // Nothing worth recording — don't overwrite a good snapshot with an empty one.
+  if (!Object.keys(prices).length && !(grandTotal > 0)) return;
+  homeSnapshotWrittenAt = now;
+  try {
+    localStorage.setItem(HOME_SNAPSHOT_KEY, JSON.stringify({
+      savedAt: now, prices, portfolioTotal: isFinite(grandTotal) ? grandTotal : 0,
+    }));
+  } catch { /* private mode */ }
+}
+
+function renderHomeSince(quoteMap, grandTotal) {
+  const row = document.getElementById("hudSince");
+  const prev = homePrevSnapshot;
+  // Hidden rather than placeholdered on a first visit, and on a plain reload —
+  // "Since your last visit: +$0" three seconds later reads like a bug.
+  if (!prev || Date.now() - prev.savedAt < HOME_VISIT_GAP_MS) { row.hidden = true; return; }
+
+  const bits = [];
+  const prevTotal = prev.portfolioTotal;
+  if (isFinite(prevTotal) && prevTotal > 0 && isFinite(grandTotal) && grandTotal > 0) {
+    const d = grandTotal - prevTotal;
+    if (Math.abs(d) >= 0.5) {
+      bits.push(`<span>Portfolio <span class="${d >= 0 ? "up" : "down"}">${d >= 0 ? "+" : "−"}${fmtCcy(Math.abs(d), "USD")}</span></span>`);
+    }
+  }
+
+  let best = null, worst = null;
+  Object.keys(prev.prices || {}).forEach(t => {
+    const q = quoteMap[t], was = prev.prices[t];
+    if (!q || q.error || !isFinite(q.price) || !isFinite(was) || !was) return;
+    const pct = (q.price - was) / was * 100;
+    if (Math.abs(pct) < 0.05) return;
+    if (!best || pct > best.pct) best = { t, pct };
+    if (!worst || pct < worst.pct) worst = { t, pct };
+  });
+  if (best && best.pct > 0) bits.push(`<span><b>${escapeHtml(best.t)}</b> <span class="up">+${best.pct.toFixed(2)}%</span></span>`);
+  if (worst && worst.pct < 0 && (!best || worst.t !== best.t)) bits.push(`<span><b>${escapeHtml(worst.t)}</b> <span class="down">${worst.pct.toFixed(2)}%</span></span>`);
+
+  if (!bits.length) { row.hidden = true; return; }
+  row.hidden = false;
+  row.innerHTML = `<span class="since-label">Since your last visit (${escapeHtml(relTime(prev.savedAt))})</span>` + bits.join("");
+}
+
+function homeEmpty(iconPath, copy, ctaLabel, ctaAttr) {
+  return `<div class="project-empty">
+    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true">${iconPath}</svg>
+    <p style="margin:8px 0 0">${copy}</p>
+    <button class="btn btn-primary home-cta" ${ctaAttr}>${ctaLabel}</button>
+  </div>`;
+}
+
+function renderHomePortfolio(quoteMap) {
+  const body = document.getElementById("homePortfolioBody");
+  const sub = document.getElementById("homePortfolioSub");
+
+  if (!portfolioPositions.length) {
+    sub.textContent = "";
+    body.innerHTML = homeEmpty(
+      '<circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/><path d="M12 7v10M8.5 10.5h7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>',
+      "No positions tracked yet.", "Add a position", 'data-home-go="portfolio-add"');
+    return;
+  }
+
+  const { computed, grandTotal } = computePortfolioValues(portfolioPositions, quoteMap);
+  const liveRows = portfolioPositions.filter(p => p.kind === "live");
+  const gotQuote = liveRows.some(p => { const q = quoteMap[p.ticker]; return q && !q.error && isFinite(q.price); });
+  // Failed quotes compute to price 0, which would render a confident, wrong $0.
+  // Show an em dash instead when nothing came back at all.
+  const blind = liveRows.length > 0 && !gotQuote;
+  sub.textContent = blind ? "Live prices unavailable" : "";
+
+  let dayChange = 0;
+  liveRows.forEach(p => { const q = quoteMap[p.ticker]; if (q && !q.error && isFinite(q.change)) dayChange += q.change * p.shares; });
+  const prevClose = grandTotal - dayChange;
+  const dayPct = prevClose > 0 ? dayChange / prevClose * 100 : 0;
+
+  let gain = 0, gainBase = 0, withCost = 0;
+  computed.forEach(({ pos, price }) => {
+    if (pos.kind === "cash" || pos.avgCost == null || !isFinite(price) || !price) return;
+    withCost++; gain += (price - pos.avgCost) * pos.shares; gainBase += pos.avgCost * pos.shares;
+  });
+  const gainPct = gainBase > 0 ? gain / gainBase * 100 : null;
+
+  const money = v => fmtCcy(v, "USD");
+  const dash = `<span class="kpi-value is-empty">${EMDASH}</span>`;
+  body.innerHTML = `
+    <div class="kpi-grid">
+      <div class="kpi">
+        <div class="kpi-label">Total Value</div>
+        ${blind ? dash : `<div class="kpi-value hud-readout" id="homeTotalValue" style="color:var(--gold)">${money(grandTotal)}</div>`}
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Day Change</div>
+        ${blind ? dash : `<div class="kpi-value hud-readout" style="color:${dayChange >= 0 ? "#35c294" : "#ff8f8f"}">${dayChange >= 0 ? "+" : "−"}${money(Math.abs(dayChange))}</div>
+        <div class="kpi-unit">${dayChange >= 0 ? "+" : "−"}${Math.abs(dayPct).toFixed(2)}% today</div>`}
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Total Gain / Loss</div>
+        ${blind || !withCost ? dash : `<div class="kpi-value hud-readout" style="color:${gain >= 0 ? "#35c294" : "#ff8f8f"}">${gain >= 0 ? "+" : "−"}${money(Math.abs(gain))}</div>`}
+        <div class="kpi-unit">${withCost ? `${gainPct != null ? (gain >= 0 ? "+" : "−") + Math.abs(gainPct).toFixed(1) + "% · " : ""}${withCost} of ${portfolioPositions.length} with a cost basis` : "No cost basis recorded"}</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Positions</div>
+        <div class="kpi-value">${portfolioPositions.length}</div>
+      </div>
+    </div>
+    <div class="donut-card-body" style="padding:14px 0 0">
+      <svg id="homeHoldingsDonut" class="donut-svg" viewBox="0 0 200 200" role="img" aria-label="Portfolio holdings by position"></svg>
+      <div class="donut-legend" id="homeHoldingsLegend"></div>
+    </div>`;
+
+  const slices = topSlicesWithOther(computed.map(c => ({ label: c.pos.displayLabel, value: c.value })));
+  renderDonutChart("homeHoldingsDonut", "homeHoldingsLegend", slices);
+
+  if (!blind && isFinite(homePrevTotal) && homePrevTotal !== grandTotal) {
+    animateNumber(document.getElementById("homeTotalValue"), homePrevTotal, grandTotal, money);
+  }
+  if (!blind) homePrevTotal = grandTotal;
+  return grandTotal;
+}
+
+function renderHomeMovers(prevQuoteMap) {
+  const body = document.getElementById("homeMoversBody");
+  const sub = document.getElementById("homeMoversSub");
+  sub.textContent = "";
+
+  if (!bridgeUp) {
+    body.innerHTML = `<div class="project-empty"><p style="margin:0">Live quotes need the bridge running.</p></div>`;
+    return;
+  }
+  if (!watchlistTickers.length) {
+    body.innerHTML = homeEmpty(
+      '<path d="M3 17l5-6 4 4 6-8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>',
+      "No tickers on your watchlist.", "Add a ticker", 'data-home-go="watchlist-add"');
+    return;
+  }
+
+  const rows = watchlistTickers
+    .map(t => watchlistQuoteMap[t])
+    .filter(q => q && !q.error && isFinite(q.changePct))
+    .sort((a, b) => Math.abs(b.changePct) - Math.abs(a.changePct))
+    .slice(0, 5);
+
+  if (!rows.length) {
+    body.innerHTML = `<div class="project-empty"><p style="margin:0">Quotes unavailable right now — retrying.</p></div>`;
+    return;
+  }
+
+  sub.textContent = rows.length + " of " + watchlistTickers.length;
+  body.innerHTML = rows.map(q => {
+    const dir = q.changePct > 0 ? "up" : q.changePct < 0 ? "down" : "flat";
+    return `<button type="button" class="mover-row" data-mover="${escapeHtml(q.ticker)}">
+      <span class="mover-sym">${escapeHtml(q.ticker)}</span>
+      <span class="mover-name"></span>
+      <span class="mover-price hud-readout">$${q.price.toFixed(2)}</span>
+      <span class="wl-change ${dir}">${q.changePct >= 0 ? "+" : ""}${q.changePct.toFixed(2)}%</span>
+    </button>`;
+  }).join("");
+
+  body.querySelectorAll("[data-mover]").forEach(btn => {
+    btn.addEventListener("click", () => openWatchlistChart(btn.dataset.mover));
+  });
+
+  // Pulse rows whose price moved between polls, matching the watchlist chips.
+  if (prevQuoteMap) {
+    rows.forEach(q => {
+      const was = prevQuoteMap[q.ticker];
+      if (!was || !isFinite(was.price) || was.price === q.price) return;
+      const row = body.querySelector(`[data-mover="${CSS.escape(q.ticker)}"]`);
+      if (!row) return;
+      const cls = q.price > was.price ? "wl-pulse-up" : "wl-pulse-down";
+      row.classList.add(cls);
+      row.addEventListener("animationend", () => row.classList.remove(cls), { once: true });
+    });
+  }
+}
+
+function renderHomeNetWorth() {
+  const body = document.getElementById("homeNetWorthBody");
+  const sub = document.getElementById("homeNetWorthSub");
+  sub.textContent = "";
+
+  if (!nw.income && !nw.expenses && !nw.start) {
+    body.innerHTML = homeEmpty(
+      '<path d="M4 19V9M10 19V5M16 19v-7M21 19H3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>',
+      "Tell it what you earn and spend.", "Set up net worth", 'data-home-go="networth"');
+    return;
+  }
+  if (!nwResults) recomputeNW();
+  const r = nwResults;
+  const meta = nwMeta();
+
+  body.innerHTML = `
+    <div class="kpi-grid">
+      <div class="kpi nw">
+        <div class="kpi-label">Net worth today</div>
+        <div class="kpi-value">${fmtMoney(nw.start)}</div>
+      </div>
+      <div class="kpi nw">
+        <div class="kpi-label">Saving ${escapeHtml(meta.label)}</div>
+        <div class="kpi-value">${fmtMoney(r.perPeriod)}</div>
+      </div>
+      <div class="kpi nw">
+        <div class="kpi-label">Savings rate</div>
+        <div class="kpi-value">${(r.savingsRate * 100).toFixed(1)}<span class="kpi-unit">%</span></div>
+      </div>
+      <div class="kpi nw">
+        <div class="kpi-label">In ${nw.horizon} years</div>
+        <div class="kpi-value">${fmtMoneyShort(r.final)}</div>
+      </div>
+    </div>`;
+
+  const ins = computeLogInsights();
+  if (ins) {
+    // .kpi-foot.pos/.neg are scoped under .kpi.nw, so they don't reach here —
+    // use the same gain/loss pair the rest of this screen uses.
+    const vsColor = ins.vsPlan >= 0 ? "#35c294" : "#ff8f8f";
+    body.insertAdjacentHTML("beforeend",
+      `<div class="hint" style="margin-top:12px">${ins.n} month${ins.n === 1 ? "" : "s"} logged · avg saved ${fmtMoney(ins.avgSaved)}/mo · ` +
+      `<span style="color:${vsColor}">${ins.vsPlan >= 0 ? "+" : "−"}${fmtMoney(Math.abs(ins.vsPlan))} vs plan</span></div>`);
+  }
+}
+
+function renderHomeProjects() {
+  const body = document.getElementById("homeProjectsBody");
+  const sub = document.getElementById("homeProjectsSub");
+  const all = Object.values(loadProjects()).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+
+  if (!all.length) {
+    sub.textContent = "";
+    body.innerHTML = homeEmpty(
+      '<path d="M5 4h9l5 5v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M14 4v5h5" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>',
+      "Nothing saved yet.", "Build a projection", 'data-home-go="projection"');
+    return;
+  }
+
+  sub.textContent = all.length + " saved";
+  body.innerHTML = `<div class="project-list">` + all.slice(0, 4).map(p => `
+    <button type="button" class="project-row" data-home-project="${escapeHtml(p.id)}">
+      <span class="project-row-main">
+        <span class="project-row-name">${escapeHtml(p.name || "Untitled")}${p.id === currentProjectId ? '<span class="active-pip"></span>' : ""}</span>
+        <span class="project-row-meta">${escapeHtml(p.ticker || "—")} · Revenue ${fmtMoneyShort(p.company && p.company.revenue)} · ${escapeHtml(relTime(p.updatedAt))}</span>
+      </span>
+    </button>`).join("") + `</div>`;
+
+  body.querySelectorAll("[data-home-project]").forEach(btn => {
+    btn.addEventListener("click", () => { loadProjectById(btn.dataset.homeProject); setView("projection"); });
+  });
+}
+
+/* One request covering the watchlist and the live portfolio rows together. */
+function homeTickerUnion() {
+  const set = new Set(watchlistTickers);
+  portfolioPositions.forEach(p => { if (p.kind === "live") set.add(p.ticker); });
+  return [...set];
+}
+
+async function refreshHomeQuotes() {
+  const tickers = homeTickerUnion();
+  if (!tickers.length || !bridgeUp) return;
+  let map = {};
+  try {
+    const j = await fetch(BRIDGE + "/api/watchlist?tickers=" + tickers.join(",")).then(r => r.json());
+    (j.quotes || []).forEach(q => { map[q.ticker] = q; });
+  } catch { return; }
+  const prev = homeQuoteMap;
+  homeQuoteMap = map;
+  homeLastSyncAt = Date.now();
+  // Partial re-render only — re-rendering #viewHome wholesale would restart the
+  // entrance animations and kill any pulse mid-flight.
+  const total = renderHomePortfolio(map);
+  renderHomeMovers(prev);
+  renderHomeStatus();
+  renderHomeSince(map, total);
+  writeHomeSnapshot(map, total);
+}
+
+function stopHomeLive() {
+  if (homePollTimer) { clearInterval(homePollTimer); homePollTimer = null; }
+  if (homeClockTimer) { clearInterval(homeClockTimer); homeClockTimer = null; }
+}
+
+function startHomeLive() {
+  stopHomeLive();   // idempotent, same discipline as initWatchlist
+  homeClockTimer = setInterval(() => {
+    if (currentView !== "home" || document.visibilityState !== "visible") return;
+    renderHomeStatus();
+  }, 30000);
+  homePollTimer = setInterval(() => {
+    if (currentView !== "home" || document.visibilityState !== "visible") return;
+    refreshHomeQuotes();
+  }, HOME_POLL_MS);
+}
+
+function renderHome() {
+  // Read the previous snapshot exactly once per page load, before any write
+  // path can overwrite it.
+  if (homePrevSnapshot === undefined) homePrevSnapshot = readHomeSnapshot();
+
+  renderHomeStatus();
+  const total = renderHomePortfolio(homeQuoteMap);
+  renderHomeMovers(null);
+  renderHomeNetWorth();
+  renderHomeProjects();
+  renderHomeSince(homeQuoteMap, total);
+
+  if (!homeRevealDone) {
+    homeRevealDone = true;
+    const v = document.getElementById("viewHome");
+    // Height is only meaningful once the panels above have their content.
+    v.style.setProperty("--home-h", v.offsetHeight + "px");
+    v.classList.add("is-booting");
+    setTimeout(() => v.classList.remove("is-booting"), 1100);
+  }
+}
+
+document.addEventListener("click", (e) => {
+  const go = e.target.closest("[data-home-go]");
+  if (!go) return;
+  const dest = go.dataset.homeGo;
+  if (dest === "portfolio-add") { setView("portfolio"); document.getElementById("btnPortfolioAdd").click(); }
+  else if (dest === "watchlist-add") { document.getElementById("btnWatchlistAdd").click(); }
+  else setView(dest);
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") {
+    stopHomeLive();
+    writeHomeSnapshot(homeQuoteMap, homePrevTotal);
+  } else if (currentView === "home") {
+    refreshHomeQuotes();
+    startHomeLive();
+  }
+});
+window.addEventListener("pagehide", () => writeHomeSnapshot(homeQuoteMap, homePrevTotal));
+
 const VIEWS = {
+  home:       { mark: "HM", title: "Dashboard",           sub: "Everything at a glance",
+    swatch: "linear-gradient(145deg,var(--gold),#8f7526)", fg: "#221c05" },
   projection: { mark: "FP", title: "Projection Model",    sub: "Scenario terminal · 2026–2030",
     swatch: "linear-gradient(145deg,var(--gold),#8f7526)", fg: "#221c05" },
   calculator: { mark: "CI", title: "Compound Calculator", sub: "Growth with regular contributions",
@@ -5568,8 +6218,9 @@ const VIEWS = {
 let currentView = "projection";
 
 function setView(v) {
-  if (!VIEWS[v]) v = "projection";
+  if (!VIEWS[v]) v = "home";
   currentView = v;
+  document.getElementById("viewHome").hidden = v !== "home";
   document.getElementById("viewProjection").hidden = v !== "projection";
   document.getElementById("viewCalculator").hidden = v !== "calculator";
   document.getElementById("viewNetWorth").hidden = v !== "networth";
@@ -5587,10 +6238,16 @@ function setView(v) {
   document.querySelectorAll(".product-item").forEach(b => {
     b.setAttribute("aria-current", String(b.dataset.view === v));
   });
-  try { localStorage.setItem(VIEW_KEY, v); } catch { /* private mode */ }
+  try {
+    localStorage.setItem(VIEW_KEY, v);
+    localStorage.setItem(HOME_SEEN_KEY, "1");
+  } catch { /* private mode */ }
   if (v === "calculator") renderCalculator();
   if (v === "networth") renderNW();
   if (v === "portfolio") renderPortfolio();
+  // The live poll and clock only run while Home is actually on screen.
+  if (v === "home") { renderHome(); startHomeLive(); }
+  else stopHomeLive();
 }
 
 function closeProductMenu() {
@@ -5673,6 +6330,10 @@ if (!bootedFromProject) {
   if (up) await syncFromBridge();   // pick up anything saved on another machine
   initWatchlist(up);
 
+  // Home painted before probeBridge() resolved, so its BRIDGE pip was still
+  // showing offline and it had no quotes yet — refresh both now.
+  if (currentView === "home") { renderHomeStatus(); refreshHomeQuotes(); }
+
   // Don't clobber the user's own saved numbers with a workbook read.
   if (hadSaved) return;
   if (up) {
@@ -5741,8 +6402,15 @@ document.getElementById("portfolioTickerInput").addEventListener("keypress", (e)
 });
 
 /* Come back to whichever product you were last using. */
-try { setView(localStorage.getItem(VIEW_KEY) || "projection"); }
-catch { setView("projection"); }
+/* Come back to whichever product you were last using — except that every
+   install gets exactly one forced trip through the Dashboard first. Without
+   HOME_SEEN_KEY, an existing install already has VIEW_KEY set, so a plain
+   `|| "home"` fallback would never fire and the Dashboard would stay
+   invisible to exactly the people who already use the app. */
+try {
+  const savedView = localStorage.getItem(VIEW_KEY);
+  setView(localStorage.getItem(HOME_SEEN_KEY) ? (savedView || "home") : "home");
+} catch { setView("home"); }
 
 /* Installable PWA — only works served over http(s) (i.e. via excel_bridge.py);
    silently skipped on file:// or if the browser lacks the API. This is what
