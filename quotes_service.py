@@ -1,11 +1,13 @@
 """Live quotes for the header watchlist strip, via yfinance. Optional
 dependency — if yfinance isn't installed, every quote comes back tagged
 with an error instead of crashing the bridge."""
+import concurrent.futures
 import math
 import time
 
 _CACHE = {}       # ticker -> (fetched_at, quote_dict)
 _CACHE_TTL = 20   # seconds — cheap protection against a hot refresh loop
+_FETCH_TIMEOUT = 8   # seconds — a stalled/rate-limited symbol shouldn't block the rest of the batch
 
 
 def fetch_quotes(tickers):
@@ -24,8 +26,24 @@ def fetch_quotes(tickers):
             for t in stale:
                 _CACHE[t] = (now, _error(t, "yfinance isn't installed on the server"))
         else:
-            for t in stale:
-                _CACHE[t] = (now, _fetch_one(yf, t))
+            # Fetched concurrently, each with its own timeout — yfinance has no
+            # built-in per-request deadline, so a single stalled/rate-limited
+            # symbol (fetched serially) could otherwise hang the whole batch
+            # response, silently blocking every other ticker in it too.
+            # Not a context manager on purpose: `with ... as pool` calls
+            # shutdown(wait=True) on exit, which blocks until every submitted
+            # thread finishes — including the one we just gave up waiting on —
+            # defeating the timeout entirely. shutdown(wait=False) lets this
+            # function return promptly; the stuck thread is orphaned (Python
+            # can't force-kill a thread) but no longer blocks the response.
+            pool = concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(stale)))
+            futures = {pool.submit(_fetch_one, yf, t): t for t in stale}
+            for fut, t in futures.items():
+                try:
+                    _CACHE[t] = (now, fut.result(timeout=_FETCH_TIMEOUT))
+                except concurrent.futures.TimeoutError:
+                    _CACHE[t] = (now, _error(t, "Quote request timed out."))
+            pool.shutdown(wait=False)
 
     return [_CACHE[t][1] for t in tickers]
 
@@ -118,12 +136,12 @@ def _safe_num(v):
 
 
 def _empty_snapshot(ticker, error=None):
-    return {"ticker": ticker, "marketCap": None, "trailingPE": None, "dividendYield": None,
+    return {"ticker": ticker, "marketCap": None, "trailingPE": None, "forwardPE": None, "dividendYield": None,
             "fiftyTwoWeekLow": None, "fiftyTwoWeekHigh": None, "sector": None, "error": error}
 
 
 def fetch_snapshot(ticker):
-    """Returns one {"ticker", "marketCap", "trailingPE", "dividendYield",
+    """Returns one {"ticker", "marketCap", "trailingPE", "forwardPE", "dividendYield",
     "fiftyTwoWeekLow", "fiftyTwoWeekHigh", "sector", "error"} dict. Every field
     degrades independently to None — one missing field never blanks the rest.
     "error" is only set when nothing at all came back. Cached for an hour:
@@ -168,6 +186,7 @@ def fetch_snapshot(ticker):
     except Exception:                                              # noqa: BLE001
         info = {}
     snap["trailingPE"] = _safe_num(info.get("trailingPE"))
+    snap["forwardPE"] = _safe_num(info.get("forwardPE"))
     snap["sector"] = info.get("sector") or None
     dy = _safe_num(info.get("dividendYield"))
     if dy is not None:
@@ -177,7 +196,7 @@ def fetch_snapshot(ticker):
         snap["dividendYield"] = dy * 100 if dy <= 1 else dy
 
     if all(snap[k] is None for k in
-           ("marketCap", "trailingPE", "dividendYield", "fiftyTwoWeekLow", "fiftyTwoWeekHigh", "sector")):
+           ("marketCap", "trailingPE", "forwardPE", "dividendYield", "fiftyTwoWeekLow", "fiftyTwoWeekHigh", "sector")):
         snap["error"] = "No snapshot data found for this ticker."
 
     _SNAPSHOT_CACHE[ticker] = (now, snap)
