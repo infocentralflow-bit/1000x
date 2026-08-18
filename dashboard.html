@@ -741,6 +741,36 @@ textarea.notion-notes:not([disabled]):placeholder-shown { background: var(--gold
   box-shadow: 0 0 0 2px var(--surface-1);
 }
 
+.pf-drag-handle {
+  cursor: grab; color: var(--text-muted); font-size: 13px; line-height: 1;
+  padding: 4px; user-select: none; touch-action: none;
+}
+.pf-drag-handle:active { cursor: grabbing; }
+.pf-row-dragging { opacity: .4; }
+.pf-row-dragover { box-shadow: inset 0 2px 0 var(--gold-dim); }
+.pf-ident { display: flex; align-items: center; gap: 9px; }
+.pf-avatar {
+  display: flex; align-items: center; justify-content: center; flex: none;
+  width: 26px; height: 26px; border-radius: 50%;
+  font-size: 10.5px; font-weight: 700; color: #fff;
+}
+.pf-ident-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.pf-ident-name { font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
+.pf-cost-input {
+  width: 76px; text-align: right; background: var(--plane); border: 1px solid var(--hairline);
+  color: var(--text-primary); border-radius: var(--r-sm); padding: 4px 7px; font: inherit; font-size: 12px;
+}
+.pf-cost-input:focus { border-color: var(--gold-dim); outline: none; }
+.pf-icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; padding: 0; margin: 0 2px; flex: none;
+  border: none; border-radius: 50%; background: none; color: var(--text-muted);
+  cursor: pointer; transition: opacity .15s var(--ease), background .15s var(--ease), color .15s var(--ease);
+}
+.pf-icon-btn:hover { color: var(--text-primary); background: rgba(255,255,255,.08); }
+.pf-icon-btn.pf-delete:hover { background: rgba(255,157,157,.15); color: #ff9d9d; }
+.pf-icon-btn:focus-visible { outline: 2px solid var(--gold-dim); outline-offset: 1px; }
+
 .donut-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
 @media (max-width: 760px) { .donut-row { grid-template-columns: 1fr; } }
 .donut-card-body {
@@ -1624,11 +1654,16 @@ footer.legal code {
         <table class="summary" id="portfolioTable">
           <thead>
             <tr>
+              <th style="width:24px"></th>
               <th style="text-align:left">Ticker</th>
               <th style="text-align:right">Shares</th>
+              <th style="text-align:right">Avg. Cost Basis</th>
               <th style="text-align:right">Current Price</th>
+              <th style="text-align:right">% Chg.</th>
               <th style="text-align:right">Position Value</th>
-              <th style="text-align:right">% of Portfolio</th>
+              <th style="text-align:right" title="Combines USD and CAD values without currency conversion">% of Portfolio</th>
+              <th style="text-align:right">P/E</th>
+              <th style="text-align:right">Forward P/E</th>
               <th style="text-align:center">Action</th>
             </tr>
           </thead>
@@ -1689,6 +1724,10 @@ footer.legal code {
         <div class="calc-field">
           <label for="portfolioSharesInput">Number of Shares</label>
           <input id="portfolioSharesInput" class="calc-input" type="text" inputmode="decimal" autocomplete="off" placeholder="0">
+        </div>
+        <div class="calc-field">
+          <label for="portfolioAvgCostInput">Avg. Cost Basis <span style="text-transform:none;font-weight:400">(optional)</span></label>
+          <input id="portfolioAvgCostInput" class="calc-input" type="text" inputmode="decimal" autocomplete="off" placeholder="Leave blank to skip">
         </div>
         <div class="calc-actions">
           <button id="btnPortfolioAddConfirm" class="btn btn-primary" type="button">Add Position</button>
@@ -2659,6 +2698,9 @@ function parseWealthsimpleCsv(text) {
   if (missing.length) {
     throw new Error("This doesn't look like a Wealthsimple holdings export (missing: " + missing.join(", ") + ").");
   }
+  // Optional columns — supported when present, degrade gracefully when not.
+  const hasName = "Name" in col;
+  const hasBookValue = "Book Value (Market)" in col && "Book Value Currency (Market)" in col;
 
   const liveGroups = new Map();
   const staticGroups = new Map();
@@ -2671,10 +2713,12 @@ function parseWealthsimpleCsv(text) {
     const secType = (fields[col["Security Type"]] || "").trim();
     const symbol = (fields[col["Symbol"]] || "").trim();
     const exchange = (fields[col["Exchange"]] || "").trim();
+    const name = hasName ? (fields[col["Name"]] || "").trim() : "";
     const qty = parseFloat(fields[col["Quantity"]]) || 0;
     const mktPrice = parseFloat(fields[col["Market Price"]]) || 0;
     const mktValue = parseFloat(fields[col["Market Value"]]) || 0;
     const mktValueCcy = (fields[col["Market Value Currency"]] || "").trim();
+    const bookValue = hasBookValue ? (parseFloat(fields[col["Book Value (Market)"]]) || 0) : 0;
 
     if (!symbol) continue;
 
@@ -2689,9 +2733,13 @@ function parseWealthsimpleCsv(text) {
     const isLive = LIVE_EXCHANGES.has(exchange.toUpperCase());
     const key = symbol + "|" + exchange;
     const bucket = isLive ? liveGroups : staticGroups;
-    const g = bucket.get(key) || { symbol, exchange, shares: 0, price: mktPrice, value: 0, currency: mktValueCcy };
+    const g = bucket.get(key) || {
+      symbol, exchange, name, shares: 0, price: mktPrice, value: 0, currency: mktValueCcy, bookValue: 0,
+    };
     g.shares += qty;
     g.value += mktValue;
+    g.bookValue += bookValue;
+    if (!g.name && name) g.name = name;
     bucket.set(key, g);
   }
 
@@ -2699,20 +2747,22 @@ function parseWealthsimpleCsv(text) {
   liveGroups.forEach(g => {
     positions.push({
       id: genId(), kind: "live", ticker: g.symbol, shares: g.shares, exchange: g.exchange,
-      displayLabel: g.symbol, staticPrice: null, staticValue: null, staticCurrency: null, source: "csv",
+      displayLabel: g.symbol, companyName: g.name || null, avgCost: hasBookValue && g.shares ? g.bookValue / g.shares : null,
+      staticPrice: null, staticValue: null, staticCurrency: null, source: "csv",
     });
   });
   staticGroups.forEach(g => {
     positions.push({
       id: genId(), kind: "static", ticker: g.symbol, shares: g.shares, exchange: g.exchange,
-      displayLabel: g.symbol + " (" + g.exchange + ")",
+      displayLabel: g.symbol + " (" + g.exchange + ")", companyName: g.name || null,
+      avgCost: hasBookValue && g.shares ? g.bookValue / g.shares : null,
       staticPrice: g.price, staticValue: g.value, staticCurrency: g.currency, source: "csv",
     });
   });
   cashGroups.forEach(g => {
     positions.push({
       id: genId(), kind: "cash", ticker: g.currency, shares: 0, exchange: "",
-      displayLabel: "Cash (" + g.currency + ")",
+      displayLabel: "Cash (" + g.currency + ")", companyName: null, avgCost: null,
       staticPrice: null, staticValue: g.value, staticCurrency: g.currency, source: "csv",
     });
   });
@@ -5169,11 +5219,18 @@ function loadPortfolio() {
   // Migrate legacy {ticker, shares} records (pre-CSV-import) to the richer shape.
   let migrated = false;
   portfolioPositions = portfolioPositions.map(p => {
-    if (p.kind) return p;
+    if (p.kind) {
+      if (!("companyName" in p) || !("avgCost" in p)) {
+        migrated = true;
+        return { ...p, companyName: p.companyName ?? null, avgCost: p.avgCost ?? null };
+      }
+      return p;
+    }
     migrated = true;
     return {
       id: genId(), kind: "live", ticker: p.ticker, shares: p.shares, exchange: "",
-      displayLabel: p.ticker, staticPrice: null, staticValue: null, staticCurrency: null,
+      displayLabel: p.ticker, companyName: null, avgCost: null,
+      staticPrice: null, staticValue: null, staticCurrency: null,
       source: "manual",
     };
   });
@@ -5190,9 +5247,10 @@ function fmtCcy(v, ccy) {
   return prefix + Math.round(v).toLocaleString("en-US");
 }
 
-async function addPosition(ticker, shares) {
+async function addPosition(ticker, shares, avgCost) {
   ticker = ticker.toUpperCase().trim();
   shares = Math.max(0, parseFloat(shares) || 0);
+  avgCost = avgCost === undefined || avgCost === "" ? null : Math.max(0, parseFloat(avgCost) || 0);
   if (!ticker || !shares) return false;
   if (portfolioPositions.some(p => p.kind === "live" && p.exchange === "" && p.ticker === ticker)) {
     flashToast("Position for " + ticker + " already exists");
@@ -5200,6 +5258,7 @@ async function addPosition(ticker, shares) {
   }
   portfolioPositions.push({
     id: genId(), kind: "live", ticker, shares, exchange: "", displayLabel: ticker,
+    companyName: null, avgCost,
     staticPrice: null, staticValue: null, staticCurrency: null, source: "manual",
   });
   savePortfolio();
@@ -5207,10 +5266,44 @@ async function addPosition(ticker, shares) {
   return true;
 }
 
+function updatePositionAvgCost(id, value) {
+  const pos = portfolioPositions.find(p => p.id === id);
+  if (!pos) return;
+  const parsed = value === "" ? null : Math.max(0, parseFloat(value) || 0);
+  pos.avgCost = parsed;
+  savePortfolio();
+  renderPortfolio();
+}
+
+function reorderPosition(draggedId, targetId) {
+  if (draggedId === targetId) return;
+  const fromIdx = portfolioPositions.findIndex(p => p.id === draggedId);
+  const toIdx = portfolioPositions.findIndex(p => p.id === targetId);
+  if (fromIdx === -1 || toIdx === -1) return;
+  const [moved] = portfolioPositions.splice(fromIdx, 1);
+  portfolioPositions.splice(toIdx, 0, moved);
+  savePortfolio();
+  renderPortfolio();
+}
+
 function removePosition(id) {
   portfolioPositions = portfolioPositions.filter(p => p.id !== id);
   savePortfolio();
   renderPortfolio();
+}
+
+const EXCHANGE_FLAGS = { NASDAQ: "🇺🇸", NYSE: "🇺🇸", NYSEARCA: "🇺🇸", ARCA: "🇺🇸", BATS: "🇺🇸", OTC: "🇺🇸", TSX: "🇨🇦" };
+const AVATAR_COLORS = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#9085e9", "#4a90a4", "#c9527a"];
+
+function tickerAvatarColor(ticker) {
+  let hash = 0;
+  for (let i = 0; i < ticker.length; i++) hash = (hash * 31 + ticker.charCodeAt(i)) >>> 0;
+  return AVATAR_COLORS[hash % AVATAR_COLORS.length];
+}
+
+function pctChg(price, avgCost) {
+  if (!isFinite(price) || !isFinite(avgCost) || !avgCost) return null;
+  return (price - avgCost) / avgCost * 100;
 }
 
 async function renderPortfolio() {
@@ -5226,6 +5319,7 @@ async function renderPortfolio() {
     tableWrap.hidden = true;
     summaryCard.hidden = true;
     tbody.innerHTML = "";
+    document.getElementById("portfolioDonutRow").hidden = true;
     return;
   }
 
@@ -5244,9 +5338,18 @@ async function renderPortfolio() {
     finally { clearTimeout(abortTimer); }
   }
 
+  // Fetched once per unique non-cash ticker, shared between the P/E columns
+  // below and the Industry Breakdown donut — avoids a duplicate round-trip.
+  const snapTickers = [...new Set(portfolioPositions.filter(p => p.kind !== "cash").map(p => p.ticker))];
+  const snapshotMap = {};
+  await Promise.all(snapTickers.map(async t => {
+    try {
+      snapshotMap[t] = await fetch("/api/watchlist/snapshot?ticker=" + encodeURIComponent(t)).then(r => r.json());
+    } catch { snapshotMap[t] = null; }
+  }));
+
   const totals = {};
-  const positionValues = []; // {label, value, ticker, kind} — reused below for the Holdings donut
-  let rows = "";
+  const computed = []; // {pos, price, value, ccy} — first pass, needed before we know the combined grand total
   portfolioPositions.forEach(pos => {
     let price, value, ccy;
     if (pos.kind === "live") {
@@ -5260,14 +5363,52 @@ async function renderPortfolio() {
       ccy = pos.staticCurrency;
     }
     totals[ccy] = (totals[ccy] || 0) + value;
-    positionValues.push({ label: pos.displayLabel, value, ticker: pos.ticker, kind: pos.kind });
-    rows += `<tr>
-      <td style="text-align:left"><strong>${pos.displayLabel}</strong></td>
+    computed.push({ pos, price, value, ccy });
+  });
+
+  // Combined across currencies without FX conversion — same approximation
+  // used by the Holdings donut, so the table and chart agree with each other.
+  const grandTotal = computed.reduce((s, c) => s + c.value, 0);
+  const positionValues = computed.map(c => ({ label: c.pos.displayLabel, value: c.value, ticker: c.pos.ticker, kind: c.pos.kind }));
+
+  let rows = "";
+  computed.forEach(({ pos, price, value, ccy }) => {
+    const snap = snapshotMap[pos.ticker];
+    const chg = pos.kind === "cash" ? null : pctChg(price, pos.avgCost);
+    const chgHtml = chg === null ? "—"
+      : `<span style="color:${chg >= 0 ? "#35c294" : "#ff8f8f"}">${chg >= 0 ? "+" : ""}${chg.toFixed(1)}%</span>`;
+    const pctOfPortfolio = grandTotal > 0 ? (value / grandTotal * 100) : 0;
+    const flag = EXCHANGE_FLAGS[pos.exchange.toUpperCase()] || "";
+    const exchangeLabel = pos.kind === "cash" ? "Cash" : (pos.exchange || (pos.kind === "live" ? "—" : ""));
+
+    rows += `<tr draggable="true" data-row-id="${pos.id}">
+      <td class="pf-drag-handle" title="Drag to reorder">⋮⋮</td>
+      <td style="text-align:left">
+        <div class="pf-ident">
+          <div class="pf-avatar" style="background:${tickerAvatarColor(pos.ticker)}">${pos.ticker.slice(0, 2)}</div>
+          <div class="pf-ident-text">
+            <strong>${pos.displayLabel}</strong>
+            <span class="pf-ident-name">${flag} ${pos.companyName || exchangeLabel}</span>
+          </div>
+        </div>
+      </td>
       <td style="text-align:right">${pos.kind === "cash" ? "—" : pos.shares}</td>
+      <td style="text-align:right">${pos.kind === "cash" ? "—" :
+        `<input type="text" inputmode="decimal" class="pf-cost-input" value="${pos.avgCost != null ? pos.avgCost : ""}" placeholder="—" data-avgcost-id="${pos.id}">`}</td>
       <td style="text-align:right">${pos.kind === "cash" ? "—" : fmtCcy(price, ccy)}</td>
+      <td style="text-align:right">${chgHtml}</td>
       <td style="text-align:right">${fmtCcy(value, ccy)}</td>
-      <td style="text-align:right">—</td>
-      <td style="text-align:center"><button class="btn btn-ghost" style="padding:3px 6px;font-size:11px" data-remove-id="${pos.id}">Remove</button></td>
+      <td style="text-align:right">${pctOfPortfolio.toFixed(1)}%</td>
+      <td style="text-align:right">${snap && snap.trailingPE != null ? snap.trailingPE.toFixed(1) : "—"}</td>
+      <td style="text-align:right">${snap && snap.forwardPE != null ? snap.forwardPE.toFixed(1) : "—"}</td>
+      <td style="text-align:center">
+        <button class="pf-icon-btn pf-edit" title="Edit" data-edit-id="${pos.id}">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M11.5 2.5l2 2L5 13l-3 1 1-3 8.5-8.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+        </button>
+        <button class="pf-icon-btn pf-delete" title="Remove" data-remove-id="${pos.id}">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M6 4V2.5A1 1 0 0 1 7 1.5h2a1 1 0 0 1 1 1V4M12.5 4l-.6 9.4a1 1 0 0 1-1 .9H5.1a1 1 0 0 1-1-.9L3.5 4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </td>
     </tr>`;
   });
 
@@ -5275,6 +5416,13 @@ async function renderPortfolio() {
   document.querySelectorAll("[data-remove-id]").forEach(btn => {
     btn.addEventListener("click", () => removePosition(btn.dataset.removeId));
   });
+  document.querySelectorAll("[data-edit-id]").forEach(btn => {
+    btn.addEventListener("click", () => openEditPosition(btn.dataset.editId));
+  });
+  document.querySelectorAll("[data-avgcost-id]").forEach(inp => {
+    inp.addEventListener("change", () => updatePositionAvgCost(inp.dataset.avgcostId, inp.value));
+  });
+  wirePortfolioDragReorder(tbody);
 
   summaryCard.hidden = false;
   const totalTiles = Object.keys(totals)
@@ -5291,7 +5439,40 @@ async function renderPortfolio() {
     </div>
   `;
 
-  renderPortfolioDonuts(positionValues, Object.keys(totals).filter(ccy => totals[ccy] > 0).length > 1);
+  renderPortfolioDonuts(positionValues, snapshotMap, Object.keys(totals).filter(ccy => totals[ccy] > 0).length > 1);
+}
+
+let pfDragSourceId = null;
+function wirePortfolioDragReorder(tbody) {
+  tbody.querySelectorAll("tr[draggable]").forEach(row => {
+    row.addEventListener("dragstart", () => {
+      pfDragSourceId = row.dataset.rowId;
+      row.classList.add("pf-row-dragging");
+    });
+    row.addEventListener("dragend", () => row.classList.remove("pf-row-dragging"));
+    row.addEventListener("dragover", (e) => { e.preventDefault(); row.classList.add("pf-row-dragover"); });
+    row.addEventListener("dragleave", () => row.classList.remove("pf-row-dragover"));
+    row.addEventListener("drop", (e) => {
+      e.preventDefault();
+      row.classList.remove("pf-row-dragover");
+      if (pfDragSourceId) reorderPosition(pfDragSourceId, row.dataset.rowId);
+      pfDragSourceId = null;
+    });
+  });
+}
+
+let editingPositionId = null;
+function openEditPosition(id) {
+  const pos = portfolioPositions.find(p => p.id === id);
+  if (!pos) return;
+  editingPositionId = id;
+  document.getElementById("portfolioAddTitle").textContent = "Edit Position";
+  document.getElementById("portfolioTickerInput").value = pos.ticker;
+  document.getElementById("portfolioTickerInput").disabled = true;
+  document.getElementById("portfolioSharesInput").value = pos.shares;
+  document.getElementById("portfolioAvgCostInput").value = pos.avgCost != null ? pos.avgCost : "";
+  document.getElementById("btnPortfolioAddConfirm").textContent = "Save Changes";
+  openModalEl(document.getElementById("portfolioAddModal"));
 }
 
 const DONUT_PALETTE = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181"];
@@ -5345,7 +5526,7 @@ function renderDonutChart(svgId, legendId, slices) {
   });
 }
 
-async function renderPortfolioDonuts(positionValues, mixedCurrencies) {
+function renderPortfolioDonuts(positionValues, snapshotMap, mixedCurrencies) {
   const donutRow = document.getElementById("portfolioDonutRow");
   if (!positionValues.length) { donutRow.hidden = true; return; }
   donutRow.hidden = false;
@@ -5363,19 +5544,11 @@ async function renderPortfolioDonuts(positionValues, mixedCurrencies) {
     holdingsLegend.appendChild(note);
   }
 
-  const tickers = [...new Set(positionValues.filter(p => p.kind !== "cash").map(p => p.ticker))];
-  const sectorMap = {};
-  await Promise.all(tickers.map(async t => {
-    try {
-      const snap = await fetch("/api/watchlist/snapshot?ticker=" + encodeURIComponent(t)).then(r => r.json());
-      sectorMap[t] = (snap && snap.sector) || "Unknown";
-    } catch { sectorMap[t] = "Unknown"; }
-  }));
-
   const sectorTotals = {};
   positionValues.forEach(p => {
     if (p.kind === "cash") return;
-    const sector = sectorMap[p.ticker] || "Unknown";
+    const snap = snapshotMap[p.ticker];
+    const sector = (snap && snap.sector) || "Unknown";
     sectorTotals[sector] = (sectorTotals[sector] || 0) + p.value;
   });
   const sectorEntries = Object.keys(sectorTotals).map(s => ({ label: s, value: sectorTotals[s] }));
@@ -5524,18 +5697,43 @@ document.getElementById("portfolioCsvFile").addEventListener("change", (e) => {
   if (file) importPortfolioCsv(file);
   e.target.value = "";
 });
+function resetPortfolioAddModal() {
+  editingPositionId = null;
+  document.getElementById("portfolioAddTitle").textContent = "Add Position";
+  document.getElementById("btnPortfolioAddConfirm").textContent = "Add Position";
+  document.getElementById("portfolioTickerInput").disabled = false;
+  document.getElementById("portfolioTickerInput").value = "";
+  document.getElementById("portfolioSharesInput").value = "";
+  document.getElementById("portfolioAvgCostInput").value = "";
+}
 document.getElementById("btnPortfolioAdd").addEventListener("click", () => {
+  resetPortfolioAddModal();
   openModalEl(document.getElementById("portfolioAddModal"));
 });
 document.getElementById("btnPortfolioAddConfirm").addEventListener("click", async () => {
   const ticker = document.getElementById("portfolioTickerInput").value.toUpperCase().trim();
   const shares = document.getElementById("portfolioSharesInput").value;
-  if (await addPosition(ticker, shares)) {
+  const avgCost = document.getElementById("portfolioAvgCostInput").value;
+
+  if (editingPositionId) {
+    const pos = portfolioPositions.find(p => p.id === editingPositionId);
+    if (pos) {
+      pos.shares = Math.max(0, parseFloat(shares) || 0);
+      pos.avgCost = avgCost === "" ? null : Math.max(0, parseFloat(avgCost) || 0);
+      savePortfolio();
+      renderPortfolio();
+      closeModalEl(document.getElementById("portfolioAddModal"));
+      flashToast("Updated " + ticker);
+      resetPortfolioAddModal();
+    }
+    return;
+  }
+
+  if (await addPosition(ticker, shares, avgCost)) {
     closeModalEl(document.getElementById("portfolioAddModal"));
-    document.getElementById("portfolioTickerInput").value = "";
-    document.getElementById("portfolioSharesInput").value = "";
     flashToast("Added " + ticker + " to your portfolio");
     pulseSuccess(document.querySelector(".watchlist-chip[data-ticker=\"" + ticker + "\"]") || document.getElementById("btnPortfolioAdd"));
+    resetPortfolioAddModal();
   }
 });
 document.getElementById("portfolioTickerInput").addEventListener("keypress", (e) => {

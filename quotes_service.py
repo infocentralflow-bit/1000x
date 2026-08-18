@@ -136,12 +136,12 @@ def _safe_num(v):
 
 
 def _empty_snapshot(ticker, error=None):
-    return {"ticker": ticker, "marketCap": None, "trailingPE": None, "dividendYield": None,
+    return {"ticker": ticker, "marketCap": None, "trailingPE": None, "forwardPE": None, "dividendYield": None,
             "fiftyTwoWeekLow": None, "fiftyTwoWeekHigh": None, "sector": None, "error": error}
 
 
 def fetch_snapshot(ticker):
-    """Returns one {"ticker", "marketCap", "trailingPE", "dividendYield",
+    """Returns one {"ticker", "marketCap", "trailingPE", "forwardPE", "dividendYield",
     "fiftyTwoWeekLow", "fiftyTwoWeekHigh", "sector", "error"} dict. Every field
     degrades independently to None — one missing field never blanks the rest.
     "error" is only set when nothing at all came back. Cached for an hour:
@@ -186,6 +186,7 @@ def fetch_snapshot(ticker):
     except Exception:                                              # noqa: BLE001
         info = {}
     snap["trailingPE"] = _safe_num(info.get("trailingPE"))
+    snap["forwardPE"] = _safe_num(info.get("forwardPE"))
     snap["sector"] = info.get("sector") or None
     dy = _safe_num(info.get("dividendYield"))
     if dy is not None:
@@ -195,7 +196,7 @@ def fetch_snapshot(ticker):
         snap["dividendYield"] = dy * 100 if dy <= 1 else dy
 
     if all(snap[k] is None for k in
-           ("marketCap", "trailingPE", "dividendYield", "fiftyTwoWeekLow", "fiftyTwoWeekHigh", "sector")):
+           ("marketCap", "trailingPE", "forwardPE", "dividendYield", "fiftyTwoWeekLow", "fiftyTwoWeekHigh", "sector")):
         snap["error"] = "No snapshot data found for this ticker."
 
     _SNAPSHOT_CACHE[ticker] = (now, snap)
