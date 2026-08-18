@@ -741,6 +741,19 @@ textarea.notion-notes:not([disabled]):placeholder-shown { background: var(--gold
   box-shadow: 0 0 0 2px var(--surface-1);
 }
 
+.donut-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
+@media (max-width: 760px) { .donut-row { grid-template-columns: 1fr; } }
+.donut-card-body {
+  display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
+  padding: 18px;
+}
+.donut-svg { width: 160px; height: 160px; flex: none; }
+.donut-legend { display: flex; flex-direction: column; gap: 8px; flex: 1; min-width: 140px; }
+.donut-legend-item { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-secondary); }
+.donut-legend-item .dot { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.donut-legend-item .label { flex: 1; color: var(--text-primary); }
+.donut-legend-item .pct { font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+
 .tooltip {
   position: absolute; pointer-events: none; z-index: 20;
   min-width: 178px;
@@ -1630,6 +1643,33 @@ footer.legal code {
       <h3>Portfolio Summary</h3>
     </div>
     <div class="kpi-grid" id="portfolioSummaryGrid"></div>
+  </div>
+
+  <div class="donut-row" id="portfolioDonutRow" hidden>
+    <div class="card">
+      <div class="card-head">
+        <h3>Portfolio Holdings</h3>
+        <span class="sub">Share of total value by position</span>
+      </div>
+      <div class="card-body donut-card-body">
+        <svg id="portfolioHoldingsDonut" class="donut-svg" viewBox="0 0 200 200" role="img" aria-labelledby="portfolioHoldingsDonutTitle">
+          <title id="portfolioHoldingsDonutTitle">Portfolio holdings by position, share of total value</title>
+        </svg>
+        <div class="donut-legend" id="portfolioHoldingsLegend"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <h3>Industry Breakdown</h3>
+        <span class="sub">Share of total value by sector</span>
+      </div>
+      <div class="card-body donut-card-body">
+        <svg id="portfolioIndustryDonut" class="donut-svg" viewBox="0 0 200 200" role="img" aria-labelledby="portfolioIndustryDonutTitle">
+          <title id="portfolioIndustryDonutTitle">Portfolio holdings by industry sector, share of total value</title>
+        </svg>
+        <div class="donut-legend" id="portfolioIndustryLegend"></div>
+      </div>
+    </div>
   </div>
 
   <!-- Add Position Modal -->
@@ -5195,13 +5235,17 @@ async function renderPortfolio() {
   const liveRows = portfolioPositions.filter(p => p.kind === "live");
   let quoteMap = {};
   if (liveRows.length) {
+    const abort = new AbortController();
+    const abortTimer = setTimeout(() => abort.abort(), 12000);
     try {
-      const quotes = await fetch("/api/watchlist?tickers=" + liveRows.map(p => p.ticker).join(",")).then(r => r.json());
+      const quotes = await fetch("/api/watchlist?tickers=" + liveRows.map(p => p.ticker).join(","), { signal: abort.signal }).then(r => r.json());
       (quotes.quotes || []).forEach(q => { quoteMap[q.ticker] = q; });
     } catch { /* live rows degrade to $0.00 below, not a hard failure for the whole table */ }
+    finally { clearTimeout(abortTimer); }
   }
 
   const totals = {};
+  const positionValues = []; // {label, value, ticker, kind} — reused below for the Holdings donut
   let rows = "";
   portfolioPositions.forEach(pos => {
     let price, value, ccy;
@@ -5216,6 +5260,7 @@ async function renderPortfolio() {
       ccy = pos.staticCurrency;
     }
     totals[ccy] = (totals[ccy] || 0) + value;
+    positionValues.push({ label: pos.displayLabel, value, ticker: pos.ticker, kind: pos.kind });
     rows += `<tr>
       <td style="text-align:left"><strong>${pos.displayLabel}</strong></td>
       <td style="text-align:right">${pos.kind === "cash" ? "—" : pos.shares}</td>
@@ -5245,6 +5290,96 @@ async function renderPortfolio() {
       <div class="kpi-value">${portfolioPositions.length}</div>
     </div>
   `;
+
+  renderPortfolioDonuts(positionValues, Object.keys(totals).filter(ccy => totals[ccy] > 0).length > 1);
+}
+
+const DONUT_PALETTE = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181"];
+const DONUT_OTHER_COLOR = "#57564f";
+
+/* Caps at 5 named slices + one "Other" catch-all — a donut/pie is only a sound
+   choice for part-to-whole-at-a-glance with a handful of segments; past that,
+   adjacent slices blur and the legend stops being scannable. */
+function topSlicesWithOther(entries, maxSlices = 5) {
+  const sorted = entries.filter(e => e.value > 0).sort((a, b) => b.value - a.value);
+  const top = sorted.slice(0, maxSlices);
+  const rest = sorted.slice(maxSlices);
+  const slices = top.map((e, i) => ({ label: e.label, value: e.value, color: DONUT_PALETTE[i] }));
+  if (rest.length) {
+    slices.push({ label: "Other", value: rest.reduce((s, e) => s + e.value, 0), color: DONUT_OTHER_COLOR });
+  }
+  return slices;
+}
+
+function renderDonutChart(svgId, legendId, slices) {
+  const svg = document.getElementById(svgId);
+  const legend = document.getElementById(legendId);
+  Array.from(svg.children).forEach(c => { if (c.tagName.toLowerCase() !== "title") svg.removeChild(c); });
+  legend.innerHTML = "";
+
+  const total = slices.reduce((s, x) => s + x.value, 0);
+  if (!total) return;
+
+  const cx = 100, cy = 100, r = 70, strokeWidth = 30, gap = 2;
+  const circumference = 2 * Math.PI * r;
+  let offsetAccum = 0;
+
+  slices.forEach(sl => {
+    const frac = sl.value / total;
+    const trueDash = frac * circumference;
+    const dash = Math.max(0, trueDash - (slices.length > 1 ? gap : 0));
+    svg.appendChild(el("circle", {
+      cx, cy, r, fill: "none", stroke: sl.color, "stroke-width": strokeWidth,
+      "stroke-dasharray": `${dash} ${circumference - dash}`,
+      "stroke-dashoffset": -offsetAccum,
+      transform: `rotate(-90 ${cx} ${cy})`,
+    }));
+    offsetAccum += trueDash;
+
+    const item = document.createElement("div");
+    item.className = "donut-legend-item";
+    item.innerHTML = `<span class="dot" style="background:${sl.color}"></span>
+      <span class="label">${sl.label}</span>
+      <span class="pct">${(frac * 100).toFixed(1)}%</span>`;
+    legend.appendChild(item);
+  });
+}
+
+async function renderPortfolioDonuts(positionValues, mixedCurrencies) {
+  const donutRow = document.getElementById("portfolioDonutRow");
+  if (!positionValues.length) { donutRow.hidden = true; return; }
+  donutRow.hidden = false;
+
+  renderDonutChart("portfolioHoldingsDonut", "portfolioHoldingsLegend", topSlicesWithOther(positionValues));
+  const holdingsNote = mixedCurrencies
+    ? "Combines USD and CAD values without currency conversion — an approximate mix, not a precise total."
+    : "";
+  const holdingsLegend = document.getElementById("portfolioHoldingsLegend");
+  if (holdingsNote) {
+    const note = document.createElement("div");
+    note.className = "donut-legend-item";
+    note.style.cssText = "color:var(--text-muted);font-size:11px;margin-top:4px";
+    note.textContent = holdingsNote;
+    holdingsLegend.appendChild(note);
+  }
+
+  const tickers = [...new Set(positionValues.filter(p => p.kind !== "cash").map(p => p.ticker))];
+  const sectorMap = {};
+  await Promise.all(tickers.map(async t => {
+    try {
+      const snap = await fetch("/api/watchlist/snapshot?ticker=" + encodeURIComponent(t)).then(r => r.json());
+      sectorMap[t] = (snap && snap.sector) || "Unknown";
+    } catch { sectorMap[t] = "Unknown"; }
+  }));
+
+  const sectorTotals = {};
+  positionValues.forEach(p => {
+    if (p.kind === "cash") return;
+    const sector = sectorMap[p.ticker] || "Unknown";
+    sectorTotals[sector] = (sectorTotals[sector] || 0) + p.value;
+  });
+  const sectorEntries = Object.keys(sectorTotals).map(s => ({ label: s, value: sectorTotals[s] }));
+  renderDonutChart("portfolioIndustryDonut", "portfolioIndustryLegend", topSlicesWithOther(sectorEntries));
 }
 
 const VIEWS = {
