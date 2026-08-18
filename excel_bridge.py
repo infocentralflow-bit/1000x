@@ -1003,7 +1003,10 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/watchlist":
-            tickers = get_watchlist()
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            raw = (qs.get("tickers") or [""])[0]
+            requested = [t.strip().upper() for t in raw.split(",") if t.strip()]
+            tickers = [t for t in requested if TICKER_RE.match(t)] if requested else get_watchlist()
             self._json({"tickers": tickers, "quotes": quotes_service.fetch_quotes(tickers)})
             return
 
