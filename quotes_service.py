@@ -1,6 +1,7 @@
 """Live quotes for the header watchlist strip, via yfinance. Optional
 dependency — if yfinance isn't installed, every quote comes back tagged
 with an error instead of crashing the bridge."""
+import math
 import time
 
 _CACHE = {}       # ticker -> (fetched_at, quote_dict)
@@ -37,7 +38,7 @@ def _fetch_one(yf, ticker):
     except Exception as exc:                                      # noqa: BLE001
         return _error(ticker, str(exc) or "Couldn't reach the quote server.")
 
-    if price is None or prev is None:
+    if price is None or prev is None or not math.isfinite(price) or not math.isfinite(prev):
         return _error(ticker, "No quote found for this ticker.")
 
     change = price - prev
@@ -89,10 +90,17 @@ def fetch_history(ticker, range_key="3mo"):
         return None, "No price history found for this ticker."
 
     date_fmt = "%Y-%m-%d %H:%M" if interval.endswith(("m", "h")) else "%Y-%m-%d"
+    # A gap day (holiday, thin intraday trading, etc.) can leave Close as NaN.
+    # json.dumps happily emits a bare `NaN` token for that, which isn't valid
+    # JSON and breaks JSON.parse() on the frontend — so drop those points
+    # rather than ship a value that can't even be parsed.
     points = [
         {"date": idx.strftime(date_fmt), "close": round(float(row["Close"]), 2)}
         for idx, row in hist.iterrows()
+        if math.isfinite(row["Close"])
     ]
+    if not points:
+        return None, "No price history found for this ticker."
     return points, None
 
 
@@ -103,7 +111,10 @@ _SNAPSHOT_CACHE_TTL = 3600    # seconds — market cap/P-E/sector move far slowe
 
 
 def _safe_num(v):
-    return v if isinstance(v, (int, float)) else None
+    # NaN is a valid float but not valid JSON — json.dumps emits a bare `NaN`
+    # token for it, which breaks JSON.parse() on the frontend (the same class
+    # of bug fetch_history() guards against above).
+    return v if isinstance(v, (int, float)) and math.isfinite(v) else None
 
 
 def _empty_snapshot(ticker, error=None):
