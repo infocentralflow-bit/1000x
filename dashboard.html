@@ -121,6 +121,14 @@ body {
   display: flex; align-items: center;
   overflow: hidden;
   flex: 1; min-width: 0;
+}
+/* The fade mask only makes sense once there's a crawling marquee to fade —
+   applying it unconditionally faded out the real, non-scrolling content
+   (including a chip's own remove button) whenever the watchlist was short
+   enough to fit without scrolling. .wl-overflowing is set by
+   renderWatchlist() using the same fits-without-scrolling check that decides
+   whether to start the marquee at all. */
+.watchlist-scroll.wl-overflowing {
   -webkit-mask-image: linear-gradient(90deg, transparent, #000 20px, #000 calc(100% - 20px), transparent);
   mask-image: linear-gradient(90deg, transparent, #000 20px, #000 calc(100% - 20px), transparent);
 }
@@ -140,7 +148,25 @@ body {
 }
 @media (prefers-reduced-motion: reduce) {
   .watchlist-track-scrolling { animation: none; }
-  .watchlist-scroll { overflow-x: auto; scrollbar-width: none; -webkit-mask-image: none; mask-image: none; }
+  /* Both selectors: .watchlist-scroll.wl-overflowing (2 classes) outweighs a
+     plain .watchlist-scroll (1 class) on specificity alone, so without the
+     more specific override here reduced-motion would lose to the fade mask
+     whenever the watchlist happens to overflow. */
+  .watchlist-scroll, .watchlist-scroll.wl-overflowing {
+    overflow-x: auto; scrollbar-width: none; -webkit-mask-image: none; mask-image: none;
+    /* Same scroll-shadow technique as .table-scroll/.chart-wrap (see there for
+       how it works) — without it, this fallback has no visible cue that a
+       chip's price/change/remove-button can extend past the visible strip. */
+    background:
+      linear-gradient(to right, var(--surface-1) 30%, rgba(0,0,0,0)) 0 0,
+      linear-gradient(to right, rgba(0,0,0,0), var(--surface-1) 70%) 100% 0,
+      linear-gradient(to right, rgba(0,0,0,.35), rgba(0,0,0,0)) 0 0,
+      linear-gradient(to left, rgba(0,0,0,.35), rgba(0,0,0,0)) 100% 0;
+    background-repeat: no-repeat;
+    background-color: var(--surface-1);
+    background-size: 16px 100%, 16px 100%, 8px 100%, 8px 100%;
+    background-attachment: local, local, scroll, scroll;
+  }
   .watchlist-scroll::-webkit-scrollbar { display: none; }
 }
 .watchlist-empty { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); white-space: nowrap; }
@@ -721,6 +747,27 @@ textarea.notion-notes:not([disabled]):placeholder-shown { background: var(--gold
 .seg button:focus-visible { outline: 2px solid var(--gold-dim); outline-offset: 1px; }
 
 /* ── Chart ───────────────────────────────────────────────────────────────── */
+/* Pure-CSS scroll shadows: two gradients fixed to the scrollport's edges
+   (background-attachment: scroll) show/hide themselves as the content
+   scrolls under them, no JS needed. The matching "cover" gradients
+   (attachment: local, so they travel WITH the content) mask the shadow once
+   it's scrolled flush with an edge, so it never floats over visible content.
+   Relies on sitting directly on --surface-1, true of every .card-body this
+   is used inside. This is the only visual cue mobile users get that a
+   table/chart wider than the screen has more to see — overflow-x:auto alone
+   is invisible until you've already swiped by accident. */
+.chart-wrap, .table-scroll {
+  background:
+    linear-gradient(to right, var(--surface-1) 30%, rgba(0,0,0,0)) 0 0,
+    linear-gradient(to right, rgba(0,0,0,0), var(--surface-1) 70%) 100% 0,
+    linear-gradient(to right, rgba(0,0,0,.35), rgba(0,0,0,0)) 0 0,
+    linear-gradient(to left, rgba(0,0,0,.35), rgba(0,0,0,0)) 100% 0;
+  background-repeat: no-repeat;
+  background-color: var(--surface-1);
+  background-size: 24px 100%, 24px 100%, 10px 100%, 10px 100%;
+  background-attachment: local, local, scroll, scroll;
+  -webkit-overflow-scrolling: touch;
+}
 .chart-wrap { position: relative; overflow-x: auto; }
 #chart { display: block; width: 100%; height: auto; touch-action: pan-x pan-y; }
 /* Below this width the 920-unit viewBox would squash axis labels to ~4px.
@@ -1178,9 +1225,54 @@ footer.legal code {
   #viewHome.is-booting::after { display: none; }
   .hud-pip.is-live { animation: none; }
 }
+
+/* These small icon buttons (16-28px) were sized for a mouse pointer, well
+   under the ~44px minimum touch target (iOS HIG / Android Material
+   guidance) — coarse-pointer devices only, so mouse-driven desktop density
+   is untouched. Visual glyph size is unchanged; only the tappable box grows,
+   using a transparent ::after overlay so it doesn't disturb layout/spacing
+   of the (already correctly sized) surrounding content.
+   36px rather than the full 44px: .wl-remove sits immediately beside the
+   much larger .wl-chip-btn (open chart), and .pf-edit/.pf-delete sit right
+   next to each other — a full 44px zone centered on each of these would
+   overlap its neighbor enough to occasionally catch the wrong tap, and
+   .pf-delete is destructive. 36px plus the extra gap below keeps every pair
+   non-overlapping while still roughly doubling the two smallest targets.
+   .watchlist-add-btn deliberately excluded: it sits just 8px past the
+   scrollable watchlist strip, and whichever chip's remove button is
+   currently scrolled to that same edge would end up close enough for an
+   enlarged zone here to reach it — a static margin can't fix a collision
+   that depends on scroll position, so this one keeps its original size.
+   .wl-remove gets a smaller 28px zone rather than 36px for the same reason,
+   on the same reasoning: their raw, un-enlarged boxes can already sit close
+   enough at that scrolled-to-the-end position (a pre-existing layout
+   tightness, not introduced here) that a full 36px zone would meaningfully
+   add to it. 28px is still a real improvement over the original 16px. */
+@media (hover: none) and (pointer: coarse) {
+  .modal-close, .pf-icon-btn { position: relative; }
+  .modal-close::after, .pf-icon-btn::after {
+    content: ""; position: absolute; inset: 50% auto auto 50%;
+    width: 36px; height: 36px; transform: translate(-50%, -50%);
+  }
+  .wl-remove { position: relative; }
+  .wl-remove::after {
+    content: ""; position: absolute; inset: 50% auto auto 50%;
+    width: 28px; height: 28px; transform: translate(-50%, -50%);
+  }
+  /* Edit sits directly beside Delete — widen the gap so their enlarged zones
+     (36px, ±18px from center) can't reach each other. */
+  .pf-icon-btn { margin: 0 8px; }
+}
 @media (max-width: 720px) {
   .app { padding: 14px 13px 48px; }
-  .topbar { position: static; flex-direction: column; align-items: stretch; gap: 10px; }
+  /* position: relative, not static — .topbar's backdrop-filter forces its own
+     stacking context regardless of position, but a *static* element's
+     z-index is inert, so the context (product menu included) would collapse
+     to the base paint layer and get buried under later same-layer siblings
+     like #viewHome, silently eating every click on the open menu. relative
+     drops the sticky-on-scroll behavior (the actual intent here) while
+     keeping z-index active. */
+  .topbar { position: relative; flex-direction: column; align-items: stretch; gap: 10px; }
   .topbar .brand-switch { margin-right: 0; }
   .product-menu { left: 0; right: 0; min-width: 0; }
   .calc-layout { grid-template-columns: minmax(0, 1fr); }
@@ -3554,6 +3646,11 @@ function renderWatchlist(prevQuoteMap = {}) {
   animateWatchlistPrices(prevQuoteMap);
   const track = scroll.querySelector(".watchlist-track");
   const singleWidth = track.scrollWidth;
+  // scroll's fade mask (CSS) is scoped to this class — otherwise, with only a
+  // few short tickers, the decorative edge fade (meant to soften the crawling
+  // marquee) has nothing to crawl and instead just fades out the last real
+  // chip's own remove button, making it invisible and hard to tap.
+  scroll.classList.toggle("wl-overflowing", singleWidth > scroll.clientWidth);
   // Only crawl when the chips don't already fit — otherwise leave it static.
   if (singleWidth <= scroll.clientWidth) return;
   track.insertAdjacentHTML("beforeend", chipsHtml); // duplicate for a seamless loop
