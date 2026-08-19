@@ -261,16 +261,16 @@ body {
 .brand {
   display: flex; align-items: center; gap: 11px;
   padding: 4px 9px 4px 4px; margin: -4px -9px -4px -4px;
-  background: none; border: 1px solid transparent; border-radius: var(--r-md);
+  background: var(--surface-2); border: 1px solid var(--hairline); border-radius: var(--r-md);
   font: inherit; color: inherit; text-align: left; cursor: pointer;
   transition: background .18s var(--ease), border-color .18s var(--ease);
 }
 .brand-caret { flex: none; opacity: .5; transition: transform .2s var(--ease); }
-.brand[aria-expanded="true"] { background: var(--surface-2); border-color: var(--hairline); }
+.brand[aria-expanded="true"] { background: var(--surface-3); border-color: var(--hairline); }
 .brand[aria-expanded="true"] .brand-caret { transform: rotate(180deg); }
 .brand:focus-visible { outline: 2px solid var(--gold-dim); outline-offset: 2px; }
 @media (hover: hover) and (pointer: fine) {
-  .brand:hover { background: var(--surface-2); border-color: var(--hairline); }
+  .brand:hover { background: var(--surface-3); border-color: var(--hairline); }
 }
 .product-menu {
   position: absolute; top: calc(100% + 9px); left: 0; z-index: 60;
@@ -796,6 +796,12 @@ textarea.notion-notes:not([disabled]):placeholder-shown { background: var(--gold
 .pf-row-dragging { opacity: .4; }
 .pf-row-dragover { box-shadow: inset 0 2px 0 var(--gold-dim); }
 .pf-ident { display: flex; align-items: center; gap: 9px; }
+.pf-ident-link { cursor: pointer; border-radius: var(--r-sm); margin: -3px -4px; padding: 3px 4px; }
+.pf-ident-link:focus-visible { outline: 2px solid var(--gold-dim); outline-offset: 1px; }
+@media (hover: hover) and (pointer: fine) {
+  .pf-ident-link:hover { background: var(--surface-3); }
+  .pf-ident-link:hover strong { text-decoration: underline; text-decoration-color: var(--gold-dim); }
+}
 .pf-avatar {
   display: flex; align-items: center; justify-content: center; flex: none;
   width: 26px; height: 26px; border-radius: 50%;
@@ -1408,6 +1414,7 @@ footer.legal code {
       <label for="ticker">Ticker</label>
       <input id="ticker" class="input" value="AAPL" autocomplete="off" spellcheck="false" aria-label="Stock ticker">
     </div>
+    <button type="button" class="lock-btn" data-view-only="projection" data-home-go="portfolio-add" data-prefill-ticker="true" title="Add this ticker to your Portfolio">+ Portfolio</button>
 
     <button id="btnSignOut" class="icon-btn" title="Sign out" aria-label="Sign out" hidden>
       <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -5677,6 +5684,17 @@ function computePortfolioValues(positions, quoteMap) {
   return { totals, computed, grandTotal };
 }
 
+// Only relabels the current projection with this ticker — there's no
+// fetch-by-ticker code path anywhere in this app (Company Inputs come from
+// manual entry or an Excel workbook at boot), same limitation the manual
+// #ticker field already has today.
+function gotoProjectionForTicker(ticker) {
+  company.ticker = ticker;
+  document.getElementById("ticker").value = ticker;
+  persist();
+  setView("projection");
+}
+
 async function renderPortfolio() {
   const table = document.getElementById("portfolioTable");
   const tbody = document.getElementById("portfolioBody");
@@ -5727,7 +5745,9 @@ async function renderPortfolio() {
     rows += `<tr draggable="true" data-row-id="${pos.id}">
       <td class="pf-drag-handle" title="Drag to reorder">⋮⋮</td>
       <td style="text-align:left">
-        <div class="pf-ident">
+        <div class="pf-ident${pos.kind !== "cash" ? " pf-ident-link" : ""}"${pos.kind !== "cash"
+          ? ` data-goto-ticker="${pos.ticker}" role="button" tabindex="0" title="Open ${pos.ticker} in Projection Model"`
+          : ""}>
           <div class="pf-avatar" style="background:${tickerAvatarColor(pos.ticker)}">${pos.ticker.slice(0, 2)}</div>
           <div class="pf-ident-text">
             <strong>${pos.displayLabel}</strong>
@@ -5764,6 +5784,12 @@ async function renderPortfolio() {
   });
   document.querySelectorAll("[data-avgcost-id]").forEach(inp => {
     inp.addEventListener("change", () => updatePositionAvgCost(inp.dataset.avgcostId, inp.value));
+  });
+  document.querySelectorAll("[data-goto-ticker]").forEach(el => {
+    el.addEventListener("click", () => gotoProjectionForTicker(el.dataset.gotoTicker));
+    el.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); gotoProjectionForTicker(el.dataset.gotoTicker); }
+    });
   });
   wirePortfolioDragReorder(tbody);
 
@@ -6344,7 +6370,12 @@ document.addEventListener("click", (e) => {
   const go = e.target.closest("[data-home-go]");
   if (!go) return;
   const dest = go.dataset.homeGo;
-  if (dest === "portfolio-add") { setView("portfolio"); document.getElementById("btnPortfolioAdd").click(); }
+  if (dest === "portfolio-add") {
+    const prefillTicker = go.dataset.prefillTicker ? company.ticker : null;
+    setView("portfolio");
+    document.getElementById("btnPortfolioAdd").click();
+    if (prefillTicker) document.getElementById("portfolioTickerInput").value = prefillTicker;
+  }
   else if (dest === "watchlist-add") { document.getElementById("btnWatchlistAdd").click(); }
   else setView(dest);
 });
