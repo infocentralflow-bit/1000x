@@ -1180,6 +1180,18 @@ class Handler(BaseHTTPRequestHandler):
             if not page_id:
                 self._json({"error": "Sync to Notion once first — after that, notes keep themselves in sync."}, 400)
                 return
+            # Unlike /api/notion/sync (which re-verifies the page exists and
+            # self-heals), this endpoint only ever targets an existing page —
+            # so check first and tell the client to run a full sync instead
+            # of failing identically forever if that page was deleted.
+            ok, page_or_err = notion_service.get_page(NOTION_TOKEN, page_id)
+            if not ok:
+                status = page_or_err.get("status") if isinstance(page_or_err, dict) else 0
+                if status == 404:
+                    self._json({"error": "This Notion page was deleted.", "needsFullSync": True}, 404)
+                    return
+                self._notion_fail(page_or_err)
+                return
             ok, new_ids = notion_service.replace_notes_zone(
                 NOTION_TOKEN, page_id, notion_state.get("notesHeadingId"),
                 notion_state.get("notesBlockIds") or [], str(payload.get("notes") or ""))

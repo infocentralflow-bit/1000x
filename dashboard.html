@@ -2617,6 +2617,16 @@ let notionState = notionNormalizeState(null);
 let notionNotesText = "";
 let notionNotesTimer = null;
 let notionSyncing = false;
+// Cached result of /api/notion/status, fetched once on first switch to the
+// Projection view (not at boot — keeps this decoupled from the boot
+// sequence) so the Sync button can honestly reflect server-side
+// configuration instead of only failing after the user clicks it.
+let notionServerStatus = null;
+let notionServerStatusChecked = false;
+// Set on any sync/notes failure, cleared on the next success — makes a
+// failure visibly outlive the toast that reported it, instead of looking
+// identical to "never synced" once the toast fades.
+let notionLastError = null;
 
 /* Writes only the Notion bookkeeping into the active saved project's record
    — never company/assumptions/etc, so a Notion sync or a notes autosave can
@@ -2649,6 +2659,22 @@ function renderNotionUI() {
   updateNotionUI();
 }
 
+// Fetched once per page load, the first time the user opens the Projection
+// view — not at boot, so a Notion outage never delays the rest of the app.
+// Lets the Sync button say "not set up" up front instead of only failing
+// after a click.
+async function ensureNotionStatus() {
+  if (notionServerStatusChecked) return;
+  notionServerStatusChecked = true;
+  try {
+    const res = await fetch(BRIDGE + "/api/notion/status");
+    notionServerStatus = await res.json();
+  } catch {
+    notionServerStatus = null; // couldn't check — don't force a disabled state on a guess
+  }
+  updateNotionUI();
+}
+
 function updateNotionUI() {
   const syncBtn = document.getElementById("btnNotionSync");
   const openBtn = document.getElementById("btnNotionOpen");
@@ -2656,8 +2682,9 @@ function updateNotionUI() {
   const statusEl = document.getElementById("notionSyncStatus");
   if (!syncBtn) return;
   const hasProject = !!currentProjectId;
+  const serverNotConfigured = !!(notionServerStatus && notionServerStatus.configured === false);
 
-  syncBtn.disabled = !hasProject || notionSyncing;
+  syncBtn.disabled = !hasProject || notionSyncing || serverNotConfigured;
   const notesReady = hasProject && !!notionState.pageId;
   notesEl.disabled = !notesReady;
   document.querySelectorAll('#notionMdToolbar [data-md]').forEach(b => { b.disabled = !notesReady; });
@@ -2669,12 +2696,18 @@ function updateNotionUI() {
     openBtn.hidden = true;
   }
 
-  if (!hasProject) {
+  if (serverNotConfigured) {
+    statusEl.textContent = "Notion isn't set up on the server yet — set NOTION_TOKEN and reload.";
+    statusEl.className = "notion-status err";
+  } else if (!hasProject) {
     statusEl.textContent = "Save this projection first — Notion sync needs a name to attach to.";
     statusEl.className = "notion-status";
   } else if (notionSyncing) {
     statusEl.textContent = "Syncing…";
     statusEl.className = "notion-status busy";
+  } else if (notionLastError) {
+    statusEl.textContent = notionLastError;
+    statusEl.className = "notion-status err";
   } else if (notionState.lastSyncedAt) {
     statusEl.textContent = "Synced " + relTime(notionState.lastSyncedAt);
     statusEl.className = "notion-status ok";
@@ -2703,10 +2736,12 @@ async function notionSync() {
     const j = await res.json();
     if (!res.ok || j.error) throw new Error(j.error || ("HTTP " + res.status));
     notionState = notionNormalizeState(j.notion);
+    notionLastError = null;
     persistNotionToActiveProject();
     flashToast("Synced to Notion.");
     pulseSuccess(document.getElementById("btnNotionSync"));
   } catch (e) {
+    notionLastError = "Last sync failed — " + String(e.message || e);
     flashToast("Notion sync failed — " + String(e.message || e), true);
   } finally {
     notionSyncing = false;
@@ -2730,6 +2765,7 @@ function onNotionNotesInput() {
 
 async function notionPushNotes() {
   if (!notionState.pageId) return;
+  notionNotesTimer = null;
   const statusEl = document.getElementById("notionSyncStatus");
   statusEl.textContent = "Saving notes to Notion…";
   statusEl.className = "notion-status busy";
@@ -2739,17 +2775,26 @@ async function notionPushNotes() {
       body: JSON.stringify({ notion: notionState, notes: notionNotesText }),
     });
     const j = await res.json();
-    if (!res.ok || j.error) throw new Error(j.error || ("HTTP " + res.status));
+    if (!res.ok || j.error) {
+      notionLastError = j.needsFullSync
+        ? "This Notion page was deleted — click Sync to Notion to recreate it."
+        : "Notes sync failed — edit again to retry.";
+      flashToast(notionLastError, true);
+      updateNotionUI();
+      return;
+    }
     // The reply's block ids replace ours — the old ones were just deleted
     // server-side, so hanging onto them would target blocks that no longer
     // exist next time.
     notionState.notesBlockIds = Array.isArray(j.notesBlockIds) ? j.notesBlockIds : notionState.notesBlockIds;
+    notionLastError = null;
     persistNotionToActiveProject();
     statusEl.textContent = "Notes saved to Notion just now.";
     statusEl.className = "notion-status ok";
   } catch (e) {
-    statusEl.textContent = "Notes sync failed — will retry on your next edit.";
-    statusEl.className = "notion-status err";
+    notionLastError = "Notes sync failed — edit again to retry.";
+    flashToast(notionLastError, true);
+    updateNotionUI();
   }
 }
 
@@ -6308,6 +6353,13 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") {
     stopHomeLive();
     writeHomeSnapshot(homeQuoteMap, homePrevTotal);
+    // Flush a pending notes autosave immediately rather than losing it to
+    // the 1.5s debounce when the tab is closed or switched away from.
+    if (notionNotesTimer) {
+      clearTimeout(notionNotesTimer);
+      notionNotesTimer = null;
+      notionPushNotes();
+    }
   } else if (currentView === "home") {
     refreshHomeQuotes();
     startHomeLive();
@@ -6357,6 +6409,7 @@ function setView(v) {
   if (v === "calculator") renderCalculator();
   if (v === "networth") renderNW();
   if (v === "portfolio") renderPortfolio();
+  if (v === "projection") ensureNotionStatus();
   // The live poll and clock only run while Home is actually on screen.
   if (v === "home") {
     renderHome(); startHomeLive();
