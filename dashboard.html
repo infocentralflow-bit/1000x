@@ -1707,6 +1707,7 @@ footer.legal code {
     <div class="section-head">
       <h2>Cash Flow &amp; Net Worth</h2>
       <span class="hint">Your own money — set what you take in and what you keep, the rest is calculated</span>
+      <span class="hint" id="nwDirtyNote" hidden style="color:var(--warn,#d97706)">Unsaved changes — not yet saved to this projection</span>
       <span class="rule"></span>
       <div class="seg" id="periodSeg" role="group" aria-label="Pay period">
         <button data-period="biweekly" aria-pressed="false">Every 2 weeks</button>
@@ -2365,6 +2366,8 @@ function isDirty() { return currentProjectId !== null && stateJSON() !== savedSn
 function updateDirtyUI() {
   const dot = document.getElementById("dirtyDot");
   if (dot) dot.hidden = !isDirty();
+  const nwNote = document.getElementById("nwDirtyNote");
+  if (nwNote) nwNote.hidden = !(currentProjectId && isDirty());
   const btn = document.getElementById("btnProjectName");
   if (btn) btn.title = currentProjectId
     ? (isDirty() ? "Unsaved changes — click to rename, or Save to keep them" : "Click to rename this projection")
@@ -6418,8 +6421,32 @@ let bootedFromProject = false;
 try {
   const activeId = localStorage.getItem(ACTIVE_KEY);
   if (activeId && loadProjects()[activeId]) {
+    // Net Worth entries are edited far more often than a projection is
+    // explicitly re-saved, so the scratch autosave (STORE_KEY) can hold
+    // newer nw/nwLog data than the named project we're about to load.
+    // loadProjectById() below ends with its own persist() call, which
+    // would otherwise silently overwrite that newer scratch copy — so the
+    // comparison has to happen against a snapshot taken before it runs.
+    let scratchNW = null;
+    try {
+      const raw = localStorage.getItem(STORE_KEY);
+      const s = raw ? JSON.parse(raw) : null;
+      if (s && typeof s.savedAt === "number" && s.netWorth) scratchNW = s;
+    } catch { /* non-fatal */ }
+    const projectUpdatedAt = loadProjects()[activeId].updatedAt || 0;
+
     loadProjectById(activeId);
     bootedFromProject = true;
+
+    if (scratchNW && scratchNW.savedAt > projectUpdatedAt) {
+      nw = normalizeNW(scratchNW.netWorth);
+      nwLog = Array.isArray(scratchNW.netWorthLog) ? normalizeNWLog(scratchNW.netWorthLog) : nwLog;
+      recompute();
+      renderAll();
+      updateDirtyUI();
+      persist();
+      flashToast("Restored unsaved Net Worth changes from your last session.");
+    }
   }
 } catch { /* non-fatal */ }
 
