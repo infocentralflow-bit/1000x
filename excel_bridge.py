@@ -227,6 +227,16 @@ def pg_init():
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
                 )
             """)
+            # Same single-row shape again — one shared portfolio, stored as a
+            # JSON array of positions. updated_at lets the client detect
+            # whether the server copy is newer than what it has locally.
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS portfolio (
+                    id         TEXT PRIMARY KEY DEFAULT 'default',
+                    positions  TEXT NOT NULL,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+            """)
             conn.commit()
         _pg_error = None
         return True, None
@@ -452,6 +462,110 @@ def set_watchlist(tickers):
         return True, clean
     except OSError as exc:
         return False, f"Could not write watchlist file: {exc}"
+
+
+PORTFOLIO_FILE = os.path.join(HERE, "portfolio.json")
+PORTFOLIO_MAX = 500
+PORTFOLIO_KINDS = {"live", "static", "cash"}
+
+
+def _num_or_none(v):
+    if v is None:
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _clean_portfolio_position(raw):
+    """Validates one position from the client payload; returns a clean dict,
+    or None to drop it rather than fail the whole request."""
+    if not isinstance(raw, dict):
+        return None
+    kind = raw.get("kind")
+    if kind not in PORTFOLIO_KINDS:
+        return None
+    pos_id = str(raw.get("id") or "").strip()
+    # A cash entry's "ticker" is a currency code (e.g. "USD"), not a symbol —
+    # still just a non-empty string either way.
+    ticker = str(raw.get("ticker") or "").strip()
+    if not pos_id or not ticker:
+        return None
+    shares = _num_or_none(raw.get("shares"))
+    return {
+        "id": pos_id,
+        "kind": kind,
+        "ticker": ticker,
+        "shares": shares if shares is not None else 0,
+        "avgCost": _num_or_none(raw.get("avgCost")),
+        "staticPrice": _num_or_none(raw.get("staticPrice")),
+        "staticValue": _num_or_none(raw.get("staticValue")),
+        "staticCurrency": (str(raw["staticCurrency"]) if raw.get("staticCurrency") is not None else None),
+        "exchange": str(raw.get("exchange") or ""),
+        "displayLabel": str(raw.get("displayLabel") or ticker),
+        "companyName": (str(raw["companyName"]) if raw.get("companyName") is not None else None),
+        "source": str(raw.get("source") or "manual"),
+    }
+
+
+def get_portfolio():
+    """Returns (positions, updated_at_ms) — the shared portfolio list and
+    when it was last saved, so the client can tell whether its own local
+    copy or the server's is newer."""
+    if USE_PG:
+        try:
+            with _pg_connect() as conn, conn.cursor() as cur:
+                cur.execute("SELECT positions, updated_at FROM portfolio WHERE id = 'default'")
+                row = cur.fetchone()
+            if not row:
+                return [], 0
+            data = json.loads(row[0])
+            updated_at_ms = int(row[1].timestamp() * 1000) if row[1] else 0
+            return (data if isinstance(data, list) else []), updated_at_ms
+        except Exception as exc:                                  # noqa: BLE001
+            print(f"[bridge] Postgres read (portfolio) failed: {exc}", flush=True)
+            return [], 0
+
+    try:
+        with open(PORTFOLIO_FILE, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        if isinstance(data, dict) and isinstance(data.get("positions"), list):
+            return data["positions"], int(data.get("updatedAt") or 0)
+    except (OSError, json.JSONDecodeError):
+        pass
+    return [], 0
+
+
+def set_portfolio(positions):
+    """Validates and caps the position list, then saves it. Returns (ok, positions_or_error)."""
+    clean = []
+    for raw in (positions if isinstance(positions, list) else []):
+        p = _clean_portfolio_position(raw)
+        if p:
+            clean.append(p)
+    clean = clean[:PORTFOLIO_MAX]
+
+    if USE_PG:
+        try:
+            with _pg_connect() as conn, conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO portfolio (id, positions, updated_at)
+                    VALUES ('default', %s, now())
+                    ON CONFLICT (id) DO UPDATE
+                        SET positions = EXCLUDED.positions, updated_at = now()
+                """, (json.dumps(clean),))
+                conn.commit()
+            return True, clean
+        except Exception as exc:                                  # noqa: BLE001
+            return False, f"Could not save to database: {exc}"
+
+    try:
+        with open(PORTFOLIO_FILE, "w", encoding="utf-8") as fh:
+            json.dump({"positions": clean, "updatedAt": int(time.time() * 1000)}, fh, indent=2)
+        return True, clean
+    except OSError as exc:
+        return False, f"Could not write portfolio file: {exc}"
 
 
 def read_company():
@@ -1010,6 +1124,11 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"tickers": tickers, "quotes": quotes_service.fetch_quotes(tickers)})
             return
 
+        if path == "/api/portfolio":
+            positions, updated_at_ms = get_portfolio()
+            self._json({"positions": positions, "updatedAt": updated_at_ms})
+            return
+
         if path == "/api/watchlist/history":
             qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             ticker = (qs.get("ticker") or [""])[0].strip().upper()
@@ -1147,6 +1266,20 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": result}, 500)
                 return
             self._json({"tickers": result, "quotes": quotes_service.fetch_quotes(result)})
+            return
+
+        if path == "/api/portfolio":
+            payload = self._read_json_body()
+            raw = payload.get("positions")
+            if not isinstance(raw, list):
+                self._json({"error": "positions must be a list."}, 400)
+                return
+            ok, result = set_portfolio(raw)
+            if not ok:
+                self._json({"error": result}, 500)
+                return
+            _, updated_at_ms = get_portfolio()
+            self._json({"positions": result, "updatedAt": updated_at_ms})
             return
 
         if path == "/api/notion/settings":

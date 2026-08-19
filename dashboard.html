@@ -5536,6 +5536,7 @@ function onCalcInput(ev) {
 /* ── Product switcher ───────────────────────────────────────────────────── */
 const VIEW_KEY = "projectionModel.view.v1";
 const PORTFOLIO_KEY = "projectionModel.portfolio.v1";
+const PORTFOLIO_UPDATED_KEY = "projectionModel.portfolioUpdatedAt.v1";
 /* Set the first time any view is shown. Its absence — not VIEW_KEY's — is what
    marks an install that has never seen the Dashboard, so existing installs
    (which already have VIEW_KEY set) still get exactly one trip through it. */
@@ -5571,7 +5572,26 @@ function loadPortfolio() {
 }
 
 function savePortfolio() {
-  try { localStorage.setItem(PORTFOLIO_KEY, JSON.stringify(portfolioPositions)); } catch { /* private mode */ }
+  const updatedAt = Date.now();
+  try {
+    localStorage.setItem(PORTFOLIO_KEY, JSON.stringify(portfolioPositions));
+    localStorage.setItem(PORTFOLIO_UPDATED_KEY, String(updatedAt));
+  } catch {
+    flashToast("Couldn't save your portfolio locally — check storage settings.", true);
+  }
+  syncPortfolioToBridge(portfolioPositions, updatedAt);
+}
+
+/* Fire-and-forget, mirroring syncProjectToBridge() — localStorage (above)
+   is always the source of truth for what's on screen right now; this is
+   just a background mirror so another device can pick the list up too. */
+function syncPortfolioToBridge(positions, updatedAt) {
+  if (!bridgeUp) return;
+  fetch(BRIDGE + "/api/portfolio", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ positions, updatedAt }),
+  }).catch(() => { /* offline/bridge down — localStorage already has it */ });
 }
 
 function fmtCcy(v, ccy) {
@@ -6554,6 +6574,25 @@ if (!bootedFromProject) {
   const up = await probeBridge();
   if (up) await syncFromBridge();   // pick up anything saved on another machine
   initWatchlist(up);
+
+  // Portfolio has no natural per-position id to diff like projects do, so
+  // this is a whole-list "newer wins" merge rather than a per-record one:
+  // if another device saved a newer portfolio than what's local, adopt it
+  // wholesale.
+  if (up) {
+    try {
+      const res = await fetch(BRIDGE + "/api/portfolio");
+      if (res.ok) {
+        const j = await res.json();
+        const localUpdatedAt = +(localStorage.getItem(PORTFOLIO_UPDATED_KEY) || 0);
+        if (Array.isArray(j.positions) && (j.updatedAt || 0) > localUpdatedAt) {
+          portfolioPositions = j.positions;
+          savePortfolio();
+          renderPortfolio();
+        }
+      }
+    } catch { /* non-fatal — localStorage already has what's local */ }
+  }
 
   // Home painted before probeBridge() resolved, so its BRIDGE pip was still
   // showing offline and it had no quotes yet — refresh both now.
