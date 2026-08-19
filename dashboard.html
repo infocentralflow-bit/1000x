@@ -1102,11 +1102,16 @@ footer.legal code {
   border: 1px solid var(--hairline); border-radius: var(--r-lg);
   box-shadow: var(--shadow-card);
 }
-.home-hud::before {
-  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px;
+/* A real element, not ::before — .home-hud also carries .hud-frame, whose
+   ::before is already spoken for by the corner bracket. Sharing a pseudo-
+   element between two independent rules would make the cascade merge their
+   properties per-declaration instead of layering both effects. */
+.hud-boot-line {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 1px;
   background: linear-gradient(90deg, var(--gold-dim), var(--hairline) 55%, transparent);
   transform-origin: left center;
   animation: hud-boot-line 520ms var(--ease) both;
+  pointer-events: none;
 }
 @keyframes hud-boot-line { from { transform: scaleX(0); opacity: 0; } to { transform: scaleX(1); opacity: 1; } }
 .hud-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; flex-wrap: wrap; }
@@ -1155,8 +1160,7 @@ footer.legal code {
 }
 .mover-row:focus-visible { outline: 2px solid var(--gold-dim); outline-offset: 1px; }
 .mover-sym { font-size: 12.5px; font-weight: 700; letter-spacing: .02em; flex: none; min-width: 52px; }
-.mover-name { font-size: 11px; color: var(--text-muted); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mover-price { font-size: 12.5px; font-weight: 600; color: var(--text-secondary); flex: none; }
+.mover-price { font-size: 12.5px; font-weight: 600; color: var(--text-secondary); flex: none; margin-left: auto; }
 
 .home-cta { margin-top: 12px; }
 
@@ -1344,6 +1348,7 @@ footer.legal code {
   <!-- ── Home dashboard ──────────────────────────────────────────────────── -->
   <div id="viewHome" hidden>
     <section class="home-hud hud-frame">
+      <span class="hud-boot-line" aria-hidden="true"></span>
       <div class="hud-top">
         <div>
           <h2 class="hud-greet" id="hudGreet">Good morning.</h2>
@@ -6020,7 +6025,6 @@ function renderHomeMovers(prevQuoteMap) {
     const dir = q.changePct > 0 ? "up" : q.changePct < 0 ? "down" : "flat";
     return `<button type="button" class="mover-row" data-mover="${escapeHtml(q.ticker)}">
       <span class="mover-sym">${escapeHtml(q.ticker)}</span>
-      <span class="mover-name"></span>
       <span class="mover-price hud-readout">$${q.price.toFixed(2)}</span>
       <span class="wl-change ${dir}">${q.changePct >= 0 ? "+" : ""}${q.changePct.toFixed(2)}%</span>
     </button>`;
@@ -6128,10 +6132,18 @@ async function refreshHomeQuotes() {
   const tickers = homeTickerUnion();
   if (!tickers.length || !bridgeUp) return;
   let map = {};
+  // Same client-side backstop as fetchPortfolioQuotes(): the server bounds a
+  // batch to ~8s per ticker, but a stalled connection that never reaches the
+  // server wouldn't be caught by that, and would otherwise hang this poll
+  // (and every accumulating one after it) forever.
+  const abort = new AbortController();
+  const abortTimer = setTimeout(() => abort.abort(), 12000);
   try {
-    const j = await fetch(BRIDGE + "/api/watchlist?tickers=" + tickers.join(",")).then(r => r.json());
+    const j = await fetch(BRIDGE + "/api/watchlist?tickers=" + tickers.join(","),
+      { signal: abort.signal }).then(r => r.json());
     (j.quotes || []).forEach(q => { map[q.ticker] = q; });
   } catch { return; }
+  finally { clearTimeout(abortTimer); }
   const prev = homeQuoteMap;
   homeQuoteMap = map;
   homeLastSyncAt = Date.now();
@@ -6246,8 +6258,13 @@ function setView(v) {
   if (v === "networth") renderNW();
   if (v === "portfolio") renderPortfolio();
   // The live poll and clock only run while Home is actually on screen.
-  if (v === "home") { renderHome(); startHomeLive(); }
-  else stopHomeLive();
+  if (v === "home") {
+    renderHome(); startHomeLive();
+    // renderHome() just painted from whatever homeQuoteMap already held (stale
+    // or empty, if this is the first Home visit this session) — kick a real
+    // fetch now rather than leaving the KPIs blind for up to HOME_POLL_MS.
+    if (bridgeUp) refreshHomeQuotes();
+  } else stopHomeLive();
 }
 
 function closeProductMenu() {
