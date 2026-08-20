@@ -1463,6 +1463,7 @@ footer.legal code {
         <div class="card-head">
           <h3>Portfolio</h3>
           <span class="sub" id="homePortfolioSub"></span>
+          <button type="button" class="lock-btn portfolio-ccy-toggle" title="Show the total in USD or CAD">USD</button>
         </div>
         <div class="card-body" id="homePortfolioBody"></div>
       </section>
@@ -1934,7 +1935,7 @@ footer.legal code {
               <th style="text-align:right">Current Price</th>
               <th style="text-align:right">% Chg.</th>
               <th style="text-align:right">Position Value</th>
-              <th style="text-align:right" title="Combines USD and CAD values without currency conversion">% of Portfolio</th>
+              <th style="text-align:right" title="Converted to your chosen display currency using live FX rates">% of Portfolio</th>
               <th style="text-align:right">P/E</th>
               <th style="text-align:right">Forward P/E</th>
               <th style="text-align:center">Action</th>
@@ -1949,6 +1950,7 @@ footer.legal code {
   <div class="card" id="portfolioSummaryCard" hidden>
     <div class="card-head">
       <h3>Portfolio Summary</h3>
+      <button type="button" class="lock-btn portfolio-ccy-toggle" style="margin-left:auto" title="Show the combined total in USD or CAD">USD</button>
     </div>
     <div class="kpi-grid" id="portfolioSummaryGrid"></div>
   </div>
@@ -5594,6 +5596,53 @@ function syncPortfolioToBridge(positions, updatedAt) {
   }).catch(() => { /* offline/bridge down — localStorage already has it */ });
 }
 
+/* ── Portfolio display currency ────────────────────────────────────────────
+   Positions can be a genuine mix of currencies (USD live rows, CAD static
+   rows off TSX, cash in either). Summing them raw and slapping a "$" on it
+   — what this used to do — is not a total, it's two numbers glued together.
+   This fetches real FX rates (via the bridge, which asks Yahoo the same way
+   it already asks for stock quotes) and converts everything into one chosen
+   currency before summing. */
+const PORTFOLIO_CCY_KEY = "projectionModel.portfolioCcy.v1";
+let portfolioDisplayCcy = (() => {
+  try { return localStorage.getItem(PORTFOLIO_CCY_KEY) === "CAD" ? "CAD" : "USD"; } catch { return "USD"; }
+})();
+// rates[ccy] = how many units of portfolioDisplayCcy one unit of ccy is worth.
+// Starts as an identity table (nothing converted yet) so computePortfolioValues
+// degrades exactly like it always did until the first real fetch lands.
+let fxRates = { to: portfolioDisplayCcy, rates: { [portfolioDisplayCcy]: 1 } };
+let fxRatesFetchedAt = 0;
+
+async function refreshFxRates() {
+  const to = portfolioDisplayCcy;
+  const needed = [...new Set(portfolioPositions.map(p =>
+    p.kind === "live" ? "USD" : (p.staticCurrency || "USD")))].filter(c => c !== to);
+  if (!needed.length) { fxRates = { to, rates: { [to]: 1 } }; fxRatesFetchedAt = Date.now(); return; }
+  if (fxRates.to === to && needed.every(c => c in fxRates.rates) && Date.now() - fxRatesFetchedAt < 30000) return;
+  if (!bridgeUp) return; // keep whatever's cached — better an approximate total than none
+  try {
+    const res = await fetch(BRIDGE + "/api/fx?to=" + to + "&currencies=" + needed.join(","));
+    const j = await res.json();
+    if (res.ok && j.rates) { fxRates = { to, rates: j.rates }; fxRatesFetchedAt = Date.now(); }
+  } catch { /* offline — keep the previous cache */ }
+}
+
+function setPortfolioDisplayCcy(ccy) {
+  ccy = ccy === "CAD" ? "CAD" : "USD";
+  if (ccy === portfolioDisplayCcy) return;
+  portfolioDisplayCcy = ccy;
+  try { localStorage.setItem(PORTFOLIO_CCY_KEY, ccy); } catch { /* non-fatal */ }
+  document.querySelectorAll(".portfolio-ccy-toggle").forEach(btn => { btn.textContent = ccy; });
+  refreshFxRates().then(() => {
+    if (currentView === "home") { const t = renderHomePortfolio(homeQuoteMap); renderHomeSince(homeQuoteMap, t); }
+    else if (currentView === "portfolio") renderPortfolio();
+  });
+}
+document.querySelectorAll(".portfolio-ccy-toggle").forEach(btn => {
+  btn.textContent = portfolioDisplayCcy;
+  btn.addEventListener("click", () => setPortfolioDisplayCcy(portfolioDisplayCcy === "USD" ? "CAD" : "USD"));
+});
+
 function fmtCcy(v, ccy) {
   if (!isFinite(v)) return EMDASH;
   const prefix = ccy === "CAD" ? "C$" : ccy === "USD" ? "$" : (ccy ? ccy + " " : "$");
@@ -5678,13 +5727,22 @@ async function fetchPortfolioQuotes(positions) {
   return quoteMap;
 }
 
-/* Pure: (positions, quoteMap) -> per-row values and totals. Shared by the
-   Portfolio table and the Home snapshot so the two can never disagree.
-   `grandTotal` deliberately sums across currencies without FX conversion —
-   the same approximation the Holdings donut uses, so table and chart agree. */
-function computePortfolioValues(positions, quoteMap) {
+/* Pure: (positions, quoteMap, toCcy, rates) -> per-row values and totals.
+   Shared by the Portfolio table and the Home snapshot so the two can never
+   disagree. `value`/`ccy` stay in each position's own native currency (for
+   the per-row table); `convertedValue` is that amount converted into
+   `toCcy` via `rates` (native currency -> toCcy multiplier, 1 for toCcy
+   itself) — this is what `grandTotal`, the donut, and % of portfolio use,
+   so a mixed USD/CAD book adds up to one real total instead of a raw sum.
+   A currency with no entry in `rates` degrades to its raw value
+   un-converted and flips `mixedCcy` on, same honest fallback this used to
+   apply to every cross-currency sum before FX rates existed. */
+function computePortfolioValues(positions, quoteMap, toCcy, rates) {
+  toCcy = toCcy || "USD";
+  rates = rates || {};
   const totals = {};
   const computed = [];
+  let mixedCcy = false;
   positions.forEach(pos => {
     let price, value, ccy;
     if (pos.kind === "live") {
@@ -5695,13 +5753,16 @@ function computePortfolioValues(positions, quoteMap) {
     } else {
       price = pos.staticPrice;
       value = pos.staticValue;
-      ccy = pos.staticCurrency;
+      ccy = pos.staticCurrency || "USD";
     }
     totals[ccy] = (totals[ccy] || 0) + value;
-    computed.push({ pos, price, value, ccy });
+    const rate = ccy === toCcy ? 1 : rates[ccy];
+    const convertedValue = isFinite(rate) ? value * rate : value;
+    if (!isFinite(rate)) mixedCcy = true;
+    computed.push({ pos, price, value, ccy, convertedValue });
   });
-  const grandTotal = computed.reduce((s, c) => s + c.value, 0);
-  return { totals, computed, grandTotal };
+  const grandTotal = computed.reduce((s, c) => s + c.convertedValue, 0);
+  return { totals, computed, grandTotal, toCcy, mixedCcy };
 }
 
 // Only relabels the current projection with this ticker — there's no
@@ -5735,7 +5796,7 @@ async function renderPortfolio() {
   empty.hidden = true;
   tableWrap.hidden = false;
 
-  const quoteMap = await fetchPortfolioQuotes(portfolioPositions);
+  const [quoteMap] = await Promise.all([fetchPortfolioQuotes(portfolioPositions), refreshFxRates()]);
 
   // Fetched once per unique non-cash ticker, shared between the P/E columns
   // below and the Industry Breakdown donut — avoids a duplicate round-trip.
@@ -5749,16 +5810,16 @@ async function renderPortfolio() {
     } catch { snapshotMap[t] = null; }
   }));
 
-  const { totals, computed, grandTotal } = computePortfolioValues(portfolioPositions, quoteMap);
-  const positionValues = computed.map(c => ({ label: c.pos.displayLabel, value: c.value, ticker: c.pos.ticker, kind: c.pos.kind }));
+  const { totals, computed, grandTotal, mixedCcy } = computePortfolioValues(portfolioPositions, quoteMap, portfolioDisplayCcy, fxRates.rates);
+  const positionValues = computed.map(c => ({ label: c.pos.displayLabel, value: c.convertedValue, ticker: c.pos.ticker, kind: c.pos.kind }));
 
   let rows = "";
-  computed.forEach(({ pos, price, value, ccy }) => {
+  computed.forEach(({ pos, price, value, ccy, convertedValue }) => {
     const snap = snapshotMap[pos.ticker];
     const chg = pos.kind === "cash" ? null : pctChg(price, pos.avgCost);
     const chgHtml = chg === null ? "—"
       : `<span style="color:${chg >= 0 ? "#35c294" : "#ff8f8f"}">${chg >= 0 ? "+" : ""}${chg.toFixed(1)}%</span>`;
-    const pctOfPortfolio = grandTotal > 0 ? (value / grandTotal * 100) : 0;
+    const pctOfPortfolio = grandTotal > 0 ? (convertedValue / grandTotal * 100) : 0;
     const flag = EXCHANGE_FLAGS[pos.exchange.toUpperCase()] || "";
     const exchangeLabel = pos.kind === "cash" ? "Cash" : (pos.exchange || (pos.kind === "live" ? "—" : ""));
 
@@ -5814,21 +5875,32 @@ async function renderPortfolio() {
   wirePortfolioDragReorder(tbody);
 
   summaryCard.hidden = false;
-  const totalTiles = Object.keys(totals)
-    .filter(ccy => totals[ccy] > 0)
+  const activeCcys = Object.keys(totals).filter(ccy => totals[ccy] > 0);
+  // With one currency in play, that currency's own breakdown tile below
+  // already IS the accurate total — a second "converted" tile would just
+  // repeat it under a different label. With more than one, the two kinds of
+  // tile can otherwise share a currency (e.g. displaying in USD when USD is
+  // also one of the native currencies) with different amounts, so they need
+  // visibly different labels, not just "Total (USD)" twice.
+  const combinedTile = activeCcys.length > 1 ? `<div class="kpi">
+      <div class="kpi-label">Total, converted (${portfolioDisplayCcy}${mixedCcy ? ", approx." : ""})</div>
+      <div class="kpi-value" style="color:var(--gold)">${fmtCcy(grandTotal, portfolioDisplayCcy)}</div>
+      ${mixedCcy ? `<div class="kpi-foot" style="color:var(--text-muted)">A rate for one of your currencies isn't available right now — that portion is shown unconverted.</div>` : ""}
+    </div>` : "";
+  const totalTiles = activeCcys
     .map(ccy => `<div class="kpi">
-        <div class="kpi-label">Total (${ccy})</div>
+        <div class="kpi-label">${ccy} positions</div>
         <div class="kpi-value" style="color:var(--gold)">${fmtCcy(totals[ccy], ccy)}</div>
       </div>`)
     .join("");
-  summaryGrid.innerHTML = totalTiles + `
+  summaryGrid.innerHTML = combinedTile + totalTiles + `
     <div class="kpi">
       <div class="kpi-label">Number of Positions</div>
       <div class="kpi-value">${portfolioPositions.length}</div>
     </div>
   `;
 
-  renderPortfolioDonuts(positionValues, snapshotMap, Object.keys(totals).filter(ccy => totals[ccy] > 0).length > 1);
+  renderPortfolioDonuts(positionValues, snapshotMap, mixedCcy);
 }
 
 let pfDragSourceId = null;
@@ -5915,14 +5987,14 @@ function renderDonutChart(svgId, legendId, slices) {
   });
 }
 
-function renderPortfolioDonuts(positionValues, snapshotMap, mixedCurrencies) {
+function renderPortfolioDonuts(positionValues, snapshotMap, hasUnconvertedCcy) {
   const donutRow = document.getElementById("portfolioDonutRow");
   if (!positionValues.length) { donutRow.hidden = true; return; }
   donutRow.hidden = false;
 
   renderDonutChart("portfolioHoldingsDonut", "portfolioHoldingsLegend", topSlicesWithOther(positionValues));
-  const holdingsNote = mixedCurrencies
-    ? "Combines USD and CAD values without currency conversion — an approximate mix, not a precise total."
+  const holdingsNote = hasUnconvertedCcy
+    ? "A currency conversion rate isn't available right now — one or more values shown unconverted, so shares are approximate."
     : "";
   const holdingsLegend = document.getElementById("portfolioHoldingsLegend");
   if (holdingsNote) {
@@ -6068,7 +6140,7 @@ function writeHomeSnapshot(quoteMap, grandTotal) {
   homeSnapshotWrittenAt = now;
   try {
     localStorage.setItem(HOME_SNAPSHOT_KEY, JSON.stringify({
-      savedAt: now, prices, portfolioTotal: isFinite(grandTotal) ? grandTotal : 0,
+      savedAt: now, prices, portfolioTotal: isFinite(grandTotal) ? grandTotal : 0, portfolioCcy: portfolioDisplayCcy,
     }));
   } catch { /* private mode */ }
 }
@@ -6082,10 +6154,14 @@ function renderHomeSince(quoteMap, grandTotal) {
 
   const bits = [];
   const prevTotal = prev.portfolioTotal;
-  if (isFinite(prevTotal) && prevTotal > 0 && isFinite(grandTotal) && grandTotal > 0) {
+  // A currency toggle between visits makes the raw totals incomparable
+  // (older snapshots predate this field entirely — undefined !== "USD" is
+  // exactly the "don't compare" outcome we want for those too).
+  const sameCcy = prev.portfolioCcy === portfolioDisplayCcy;
+  if (sameCcy && isFinite(prevTotal) && prevTotal > 0 && isFinite(grandTotal) && grandTotal > 0) {
     const d = grandTotal - prevTotal;
     if (Math.abs(d) >= 0.5) {
-      bits.push(`<span>Portfolio <span class="${d >= 0 ? "up" : "down"}">${d >= 0 ? "+" : "−"}${fmtCcy(Math.abs(d), "USD")}</span></span>`);
+      bits.push(`<span>Portfolio <span class="${d >= 0 ? "up" : "down"}">${d >= 0 ? "+" : "−"}${fmtCcy(Math.abs(d), portfolioDisplayCcy)}</span></span>`);
     }
   }
 
@@ -6126,27 +6202,33 @@ function renderHomePortfolio(quoteMap) {
     return;
   }
 
-  const { computed, grandTotal } = computePortfolioValues(portfolioPositions, quoteMap);
+  const { computed, grandTotal, mixedCcy } = computePortfolioValues(portfolioPositions, quoteMap, portfolioDisplayCcy, fxRates.rates);
   const liveRows = portfolioPositions.filter(p => p.kind === "live");
   const gotQuote = liveRows.some(p => { const q = quoteMap[p.ticker]; return q && !q.error && isFinite(q.price); });
   // Failed quotes compute to price 0, which would render a confident, wrong $0.
   // Show an em dash instead when nothing came back at all.
   const blind = liveRows.length > 0 && !gotQuote;
-  sub.textContent = blind ? "Live prices unavailable" : "";
+  sub.textContent = blind ? "Live prices unavailable" : (mixedCcy ? "Some currencies shown unconverted" : "");
 
+  // Live rows are always priced in USD (see computePortfolioValues); convert
+  // the day's change into the display currency the same way convertedValue does.
+  const usdRate = portfolioDisplayCcy === "USD" ? 1 : fxRates.rates.USD;
+  const usdR = isFinite(usdRate) ? usdRate : 1;
   let dayChange = 0;
-  liveRows.forEach(p => { const q = quoteMap[p.ticker]; if (q && !q.error && isFinite(q.change)) dayChange += q.change * p.shares; });
+  liveRows.forEach(p => { const q = quoteMap[p.ticker]; if (q && !q.error && isFinite(q.change)) dayChange += q.change * p.shares * usdR; });
   const prevClose = grandTotal - dayChange;
   const dayPct = prevClose > 0 ? dayChange / prevClose * 100 : 0;
 
   let gain = 0, gainBase = 0, withCost = 0;
-  computed.forEach(({ pos, price }) => {
+  computed.forEach(({ pos, price, ccy }) => {
     if (pos.kind === "cash" || pos.avgCost == null || !isFinite(price) || !price) return;
-    withCost++; gain += (price - pos.avgCost) * pos.shares; gainBase += pos.avgCost * pos.shares;
+    const rate = ccy === portfolioDisplayCcy ? 1 : fxRates.rates[ccy];
+    const r = isFinite(rate) ? rate : 1;
+    withCost++; gain += (price - pos.avgCost) * pos.shares * r; gainBase += pos.avgCost * pos.shares * r;
   });
   const gainPct = gainBase > 0 ? gain / gainBase * 100 : null;
 
-  const money = v => fmtCcy(v, "USD");
+  const money = v => fmtCcy(v, portfolioDisplayCcy);
   const dash = `<span class="kpi-value is-empty">${EMDASH}</span>`;
   body.innerHTML = `
     <div class="kpi-grid">
@@ -6174,7 +6256,7 @@ function renderHomePortfolio(quoteMap) {
       <div class="donut-legend" id="homeHoldingsLegend"></div>
     </div>`;
 
-  const slices = topSlicesWithOther(computed.map(c => ({ label: c.pos.displayLabel, value: c.value })));
+  const slices = topSlicesWithOther(computed.map(c => ({ label: c.pos.displayLabel, value: c.convertedValue })));
   renderDonutChart("homeHoldingsDonut", "homeHoldingsLegend", slices);
 
   if (!blind && isFinite(homePrevTotal) && homePrevTotal !== grandTotal) {
@@ -6330,8 +6412,10 @@ async function refreshHomeQuotes() {
   const abort = new AbortController();
   const abortTimer = setTimeout(() => abort.abort(), 12000);
   try {
-    const j = await fetch(BRIDGE + "/api/watchlist?tickers=" + tickers.join(","),
-      { signal: abort.signal }).then(r => r.json());
+    const [j] = await Promise.all([
+      fetch(BRIDGE + "/api/watchlist?tickers=" + tickers.join(","), { signal: abort.signal }).then(r => r.json()),
+      refreshFxRates(),
+    ]);
     (j.quotes || []).forEach(q => { map[q.ticker] = q; });
   } catch { return; }
   finally { clearTimeout(abortTimer); }
@@ -6596,7 +6680,16 @@ if (!bootedFromProject) {
 
   // Home painted before probeBridge() resolved, so its BRIDGE pip was still
   // showing offline and it had no quotes yet — refresh both now.
-  if (currentView === "home") { renderHomeStatus(); refreshHomeQuotes(); }
+  if (currentView === "home") {
+    renderHomeStatus();
+    // refreshHomeQuotes() also refreshes FX rates, but only runs when there's
+    // a live ticker to poll — an all-cash/all-static portfolio still needs a
+    // real FX-converted total, so cover that case too, independently.
+    refreshFxRates().then(() => { if (currentView === "home") renderHomePortfolio(homeQuoteMap); });
+    refreshHomeQuotes();
+  } else {
+    refreshFxRates();
+  }
 
   // Don't clobber the user's own saved numbers with a workbook read.
   if (hadSaved) return;

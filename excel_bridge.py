@@ -406,6 +406,25 @@ def set_notion_settings(database_id, database_name):
 WATCHLIST_FILE = os.path.join(HERE, "watchlist.json")
 WATCHLIST_MAX = 12
 TICKER_RE = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
+CURRENCY_RE = re.compile(r"^[A-Z]{3}$")
+
+
+def get_fx_rates(to_ccy, currencies):
+    """Returns {currency: rate} where rate * 1 unit of that currency =
+    1 unit of to_ccy — via Yahoo's "{from}{to}=X" FX tickers, reusing
+    quotes_service's fetch (same cache/timeout/degrade-per-symbol behavior
+    as a stock quote). to_ccy itself is always 1.0; a currency Yahoo has no
+    rate for is simply omitted, not an error — the caller falls back to an
+    unconverted (approximate) total for just that one currency."""
+    rates = {to_ccy: 1.0}
+    needed = [c for c in currencies if c and c != to_ccy]
+    if not needed:
+        return rates
+    quotes = quotes_service.fetch_quotes([f"{c}{to_ccy}=X" for c in needed])
+    for ccy, q in zip(needed, quotes):
+        if q.get("price") is not None:
+            rates[ccy] = q["price"]
+    return rates
 
 
 def get_watchlist():
@@ -1127,6 +1146,18 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/portfolio":
             positions, updated_at_ms = get_portfolio()
             self._json({"positions": positions, "updatedAt": updated_at_ms})
+            return
+
+        if path == "/api/fx":
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            to_ccy = (qs.get("to") or ["USD"])[0].strip().upper()
+            if not CURRENCY_RE.match(to_ccy):
+                self._json({"error": "Invalid target currency."}, 400)
+                return
+            raw = (qs.get("currencies") or [""])[0]
+            currencies = [c.strip().upper() for c in raw.split(",") if c.strip()]
+            currencies = [c for c in currencies if CURRENCY_RE.match(c)]
+            self._json({"to": to_ccy, "rates": get_fx_rates(to_ccy, currencies)})
             return
 
         if path == "/api/watchlist/history":
