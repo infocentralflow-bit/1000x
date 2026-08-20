@@ -261,16 +261,16 @@ body {
 .brand {
   display: flex; align-items: center; gap: 11px;
   padding: 4px 9px 4px 4px; margin: -4px -9px -4px -4px;
-  background: none; border: 1px solid transparent; border-radius: var(--r-md);
+  background: var(--surface-2); border: 1px solid var(--hairline); border-radius: var(--r-md);
   font: inherit; color: inherit; text-align: left; cursor: pointer;
   transition: background .18s var(--ease), border-color .18s var(--ease);
 }
 .brand-caret { flex: none; opacity: .5; transition: transform .2s var(--ease); }
-.brand[aria-expanded="true"] { background: var(--surface-2); border-color: var(--hairline); }
+.brand[aria-expanded="true"] { background: var(--surface-3); border-color: var(--hairline); }
 .brand[aria-expanded="true"] .brand-caret { transform: rotate(180deg); }
 .brand:focus-visible { outline: 2px solid var(--gold-dim); outline-offset: 2px; }
 @media (hover: hover) and (pointer: fine) {
-  .brand:hover { background: var(--surface-2); border-color: var(--hairline); }
+  .brand:hover { background: var(--surface-3); border-color: var(--hairline); }
 }
 .product-menu {
   position: absolute; top: calc(100% + 9px); left: 0; z-index: 60;
@@ -796,6 +796,12 @@ textarea.notion-notes:not([disabled]):placeholder-shown { background: var(--gold
 .pf-row-dragging { opacity: .4; }
 .pf-row-dragover { box-shadow: inset 0 2px 0 var(--gold-dim); }
 .pf-ident { display: flex; align-items: center; gap: 9px; }
+.pf-ident-link { cursor: pointer; border-radius: var(--r-sm); margin: -3px -4px; padding: 3px 4px; }
+.pf-ident-link:focus-visible { outline: 2px solid var(--gold-dim); outline-offset: 1px; }
+@media (hover: hover) and (pointer: fine) {
+  .pf-ident-link:hover { background: var(--surface-3); }
+  .pf-ident-link:hover strong { text-decoration: underline; text-decoration-color: var(--gold-dim); }
+}
 .pf-avatar {
   display: flex; align-items: center; justify-content: center; flex: none;
   width: 26px; height: 26px; border-radius: 50%;
@@ -1408,6 +1414,7 @@ footer.legal code {
       <label for="ticker">Ticker</label>
       <input id="ticker" class="input" value="AAPL" autocomplete="off" spellcheck="false" aria-label="Stock ticker">
     </div>
+    <button type="button" class="lock-btn" data-view-only="projection" data-home-go="portfolio-add" data-prefill-ticker="true" title="Add this ticker to your Portfolio">+ Portfolio</button>
 
     <button id="btnSignOut" class="icon-btn" title="Sign out" aria-label="Sign out" hidden>
       <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -1707,6 +1714,7 @@ footer.legal code {
     <div class="section-head">
       <h2>Cash Flow &amp; Net Worth</h2>
       <span class="hint">Your own money — set what you take in and what you keep, the rest is calculated</span>
+      <span class="hint" id="nwDirtyNote" hidden style="color:var(--warn,#d97706)">Unsaved changes — not yet saved to this projection</span>
       <span class="rule"></span>
       <div class="seg" id="periodSeg" role="group" aria-label="Pay period">
         <button data-period="biweekly" aria-pressed="false">Every 2 weeks</button>
@@ -2365,6 +2373,8 @@ function isDirty() { return currentProjectId !== null && stateJSON() !== savedSn
 function updateDirtyUI() {
   const dot = document.getElementById("dirtyDot");
   if (dot) dot.hidden = !isDirty();
+  const nwNote = document.getElementById("nwDirtyNote");
+  if (nwNote) nwNote.hidden = !(currentProjectId && isDirty());
   const btn = document.getElementById("btnProjectName");
   if (btn) btn.title = currentProjectId
     ? (isDirty() ? "Unsaved changes — click to rename, or Save to keep them" : "Click to rename this projection")
@@ -2614,6 +2624,16 @@ let notionState = notionNormalizeState(null);
 let notionNotesText = "";
 let notionNotesTimer = null;
 let notionSyncing = false;
+// Cached result of /api/notion/status, fetched once on first switch to the
+// Projection view (not at boot — keeps this decoupled from the boot
+// sequence) so the Sync button can honestly reflect server-side
+// configuration instead of only failing after the user clicks it.
+let notionServerStatus = null;
+let notionServerStatusChecked = false;
+// Set on any sync/notes failure, cleared on the next success — makes a
+// failure visibly outlive the toast that reported it, instead of looking
+// identical to "never synced" once the toast fades.
+let notionLastError = null;
 
 /* Writes only the Notion bookkeeping into the active saved project's record
    — never company/assumptions/etc, so a Notion sync or a notes autosave can
@@ -2646,6 +2666,22 @@ function renderNotionUI() {
   updateNotionUI();
 }
 
+// Fetched once per page load, the first time the user opens the Projection
+// view — not at boot, so a Notion outage never delays the rest of the app.
+// Lets the Sync button say "not set up" up front instead of only failing
+// after a click.
+async function ensureNotionStatus() {
+  if (notionServerStatusChecked) return;
+  notionServerStatusChecked = true;
+  try {
+    const res = await fetch(BRIDGE + "/api/notion/status");
+    notionServerStatus = await res.json();
+  } catch {
+    notionServerStatus = null; // couldn't check — don't force a disabled state on a guess
+  }
+  updateNotionUI();
+}
+
 function updateNotionUI() {
   const syncBtn = document.getElementById("btnNotionSync");
   const openBtn = document.getElementById("btnNotionOpen");
@@ -2653,8 +2689,9 @@ function updateNotionUI() {
   const statusEl = document.getElementById("notionSyncStatus");
   if (!syncBtn) return;
   const hasProject = !!currentProjectId;
+  const serverNotConfigured = !!(notionServerStatus && notionServerStatus.configured === false);
 
-  syncBtn.disabled = !hasProject || notionSyncing;
+  syncBtn.disabled = !hasProject || notionSyncing || serverNotConfigured;
   const notesReady = hasProject && !!notionState.pageId;
   notesEl.disabled = !notesReady;
   document.querySelectorAll('#notionMdToolbar [data-md]').forEach(b => { b.disabled = !notesReady; });
@@ -2666,12 +2703,18 @@ function updateNotionUI() {
     openBtn.hidden = true;
   }
 
-  if (!hasProject) {
+  if (serverNotConfigured) {
+    statusEl.textContent = "Notion isn't set up on the server yet — set NOTION_TOKEN and reload.";
+    statusEl.className = "notion-status err";
+  } else if (!hasProject) {
     statusEl.textContent = "Save this projection first — Notion sync needs a name to attach to.";
     statusEl.className = "notion-status";
   } else if (notionSyncing) {
     statusEl.textContent = "Syncing…";
     statusEl.className = "notion-status busy";
+  } else if (notionLastError) {
+    statusEl.textContent = notionLastError;
+    statusEl.className = "notion-status err";
   } else if (notionState.lastSyncedAt) {
     statusEl.textContent = "Synced " + relTime(notionState.lastSyncedAt);
     statusEl.className = "notion-status ok";
@@ -2700,10 +2743,12 @@ async function notionSync() {
     const j = await res.json();
     if (!res.ok || j.error) throw new Error(j.error || ("HTTP " + res.status));
     notionState = notionNormalizeState(j.notion);
+    notionLastError = null;
     persistNotionToActiveProject();
     flashToast("Synced to Notion.");
     pulseSuccess(document.getElementById("btnNotionSync"));
   } catch (e) {
+    notionLastError = "Last sync failed — " + String(e.message || e);
     flashToast("Notion sync failed — " + String(e.message || e), true);
   } finally {
     notionSyncing = false;
@@ -2727,6 +2772,7 @@ function onNotionNotesInput() {
 
 async function notionPushNotes() {
   if (!notionState.pageId) return;
+  notionNotesTimer = null;
   const statusEl = document.getElementById("notionSyncStatus");
   statusEl.textContent = "Saving notes to Notion…";
   statusEl.className = "notion-status busy";
@@ -2736,17 +2782,26 @@ async function notionPushNotes() {
       body: JSON.stringify({ notion: notionState, notes: notionNotesText }),
     });
     const j = await res.json();
-    if (!res.ok || j.error) throw new Error(j.error || ("HTTP " + res.status));
+    if (!res.ok || j.error) {
+      notionLastError = j.needsFullSync
+        ? "This Notion page was deleted — click Sync to Notion to recreate it."
+        : "Notes sync failed — edit again to retry.";
+      flashToast(notionLastError, true);
+      updateNotionUI();
+      return;
+    }
     // The reply's block ids replace ours — the old ones were just deleted
     // server-side, so hanging onto them would target blocks that no longer
     // exist next time.
     notionState.notesBlockIds = Array.isArray(j.notesBlockIds) ? j.notesBlockIds : notionState.notesBlockIds;
+    notionLastError = null;
     persistNotionToActiveProject();
     statusEl.textContent = "Notes saved to Notion just now.";
     statusEl.className = "notion-status ok";
   } catch (e) {
-    statusEl.textContent = "Notes sync failed — will retry on your next edit.";
-    statusEl.className = "notion-status err";
+    notionLastError = "Notes sync failed — edit again to retry.";
+    flashToast(notionLastError, true);
+    updateNotionUI();
   }
 }
 
@@ -5481,6 +5536,7 @@ function onCalcInput(ev) {
 /* ── Product switcher ───────────────────────────────────────────────────── */
 const VIEW_KEY = "projectionModel.view.v1";
 const PORTFOLIO_KEY = "projectionModel.portfolio.v1";
+const PORTFOLIO_UPDATED_KEY = "projectionModel.portfolioUpdatedAt.v1";
 /* Set the first time any view is shown. Its absence — not VIEW_KEY's — is what
    marks an install that has never seen the Dashboard, so existing installs
    (which already have VIEW_KEY set) still get exactly one trip through it. */
@@ -5516,7 +5572,26 @@ function loadPortfolio() {
 }
 
 function savePortfolio() {
-  try { localStorage.setItem(PORTFOLIO_KEY, JSON.stringify(portfolioPositions)); } catch { /* private mode */ }
+  const updatedAt = Date.now();
+  try {
+    localStorage.setItem(PORTFOLIO_KEY, JSON.stringify(portfolioPositions));
+    localStorage.setItem(PORTFOLIO_UPDATED_KEY, String(updatedAt));
+  } catch {
+    flashToast("Couldn't save your portfolio locally — check storage settings.", true);
+  }
+  syncPortfolioToBridge(portfolioPositions, updatedAt);
+}
+
+/* Fire-and-forget, mirroring syncProjectToBridge() — localStorage (above)
+   is always the source of truth for what's on screen right now; this is
+   just a background mirror so another device can pick the list up too. */
+function syncPortfolioToBridge(positions, updatedAt) {
+  if (!bridgeUp) return;
+  fetch(BRIDGE + "/api/portfolio", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ positions, updatedAt }),
+  }).catch(() => { /* offline/bridge down — localStorage already has it */ });
 }
 
 function fmtCcy(v, ccy) {
@@ -5629,6 +5704,17 @@ function computePortfolioValues(positions, quoteMap) {
   return { totals, computed, grandTotal };
 }
 
+// Only relabels the current projection with this ticker — there's no
+// fetch-by-ticker code path anywhere in this app (Company Inputs come from
+// manual entry or an Excel workbook at boot), same limitation the manual
+// #ticker field already has today.
+function gotoProjectionForTicker(ticker) {
+  company.ticker = ticker;
+  document.getElementById("ticker").value = ticker;
+  persist();
+  setView("projection");
+}
+
 async function renderPortfolio() {
   const table = document.getElementById("portfolioTable");
   const tbody = document.getElementById("portfolioBody");
@@ -5679,7 +5765,9 @@ async function renderPortfolio() {
     rows += `<tr draggable="true" data-row-id="${pos.id}">
       <td class="pf-drag-handle" title="Drag to reorder">⋮⋮</td>
       <td style="text-align:left">
-        <div class="pf-ident">
+        <div class="pf-ident${pos.kind !== "cash" ? " pf-ident-link" : ""}"${pos.kind !== "cash"
+          ? ` data-goto-ticker="${pos.ticker}" role="button" tabindex="0" title="Open ${pos.ticker} in Projection Model"`
+          : ""}>
           <div class="pf-avatar" style="background:${tickerAvatarColor(pos.ticker)}">${pos.ticker.slice(0, 2)}</div>
           <div class="pf-ident-text">
             <strong>${pos.displayLabel}</strong>
@@ -5716,6 +5804,12 @@ async function renderPortfolio() {
   });
   document.querySelectorAll("[data-avgcost-id]").forEach(inp => {
     inp.addEventListener("change", () => updatePositionAvgCost(inp.dataset.avgcostId, inp.value));
+  });
+  document.querySelectorAll("[data-goto-ticker]").forEach(el => {
+    el.addEventListener("click", () => gotoProjectionForTicker(el.dataset.gotoTicker));
+    el.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); gotoProjectionForTicker(el.dataset.gotoTicker); }
+    });
   });
   wirePortfolioDragReorder(tbody);
 
@@ -6296,7 +6390,12 @@ document.addEventListener("click", (e) => {
   const go = e.target.closest("[data-home-go]");
   if (!go) return;
   const dest = go.dataset.homeGo;
-  if (dest === "portfolio-add") { setView("portfolio"); document.getElementById("btnPortfolioAdd").click(); }
+  if (dest === "portfolio-add") {
+    const prefillTicker = go.dataset.prefillTicker ? company.ticker : null;
+    setView("portfolio");
+    document.getElementById("btnPortfolioAdd").click();
+    if (prefillTicker) document.getElementById("portfolioTickerInput").value = prefillTicker;
+  }
   else if (dest === "watchlist-add") { document.getElementById("btnWatchlistAdd").click(); }
   else setView(dest);
 });
@@ -6305,6 +6404,13 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") {
     stopHomeLive();
     writeHomeSnapshot(homeQuoteMap, homePrevTotal);
+    // Flush a pending notes autosave immediately rather than losing it to
+    // the 1.5s debounce when the tab is closed or switched away from.
+    if (notionNotesTimer) {
+      clearTimeout(notionNotesTimer);
+      notionNotesTimer = null;
+      notionPushNotes();
+    }
   } else if (currentView === "home") {
     refreshHomeQuotes();
     startHomeLive();
@@ -6354,6 +6460,7 @@ function setView(v) {
   if (v === "calculator") renderCalculator();
   if (v === "networth") renderNW();
   if (v === "portfolio") renderPortfolio();
+  if (v === "projection") ensureNotionStatus();
   // The live poll and clock only run while Home is actually on screen.
   if (v === "home") {
     renderHome(); startHomeLive();
@@ -6418,8 +6525,32 @@ let bootedFromProject = false;
 try {
   const activeId = localStorage.getItem(ACTIVE_KEY);
   if (activeId && loadProjects()[activeId]) {
+    // Net Worth entries are edited far more often than a projection is
+    // explicitly re-saved, so the scratch autosave (STORE_KEY) can hold
+    // newer nw/nwLog data than the named project we're about to load.
+    // loadProjectById() below ends with its own persist() call, which
+    // would otherwise silently overwrite that newer scratch copy — so the
+    // comparison has to happen against a snapshot taken before it runs.
+    let scratchNW = null;
+    try {
+      const raw = localStorage.getItem(STORE_KEY);
+      const s = raw ? JSON.parse(raw) : null;
+      if (s && typeof s.savedAt === "number" && s.netWorth) scratchNW = s;
+    } catch { /* non-fatal */ }
+    const projectUpdatedAt = loadProjects()[activeId].updatedAt || 0;
+
     loadProjectById(activeId);
     bootedFromProject = true;
+
+    if (scratchNW && scratchNW.savedAt > projectUpdatedAt) {
+      nw = normalizeNW(scratchNW.netWorth);
+      nwLog = Array.isArray(scratchNW.netWorthLog) ? normalizeNWLog(scratchNW.netWorthLog) : nwLog;
+      recompute();
+      renderAll();
+      updateDirtyUI();
+      persist();
+      flashToast("Restored unsaved Net Worth changes from your last session.");
+    }
   }
 } catch { /* non-fatal */ }
 
@@ -6443,6 +6574,25 @@ if (!bootedFromProject) {
   const up = await probeBridge();
   if (up) await syncFromBridge();   // pick up anything saved on another machine
   initWatchlist(up);
+
+  // Portfolio has no natural per-position id to diff like projects do, so
+  // this is a whole-list "newer wins" merge rather than a per-record one:
+  // if another device saved a newer portfolio than what's local, adopt it
+  // wholesale.
+  if (up) {
+    try {
+      const res = await fetch(BRIDGE + "/api/portfolio");
+      if (res.ok) {
+        const j = await res.json();
+        const localUpdatedAt = +(localStorage.getItem(PORTFOLIO_UPDATED_KEY) || 0);
+        if (Array.isArray(j.positions) && (j.updatedAt || 0) > localUpdatedAt) {
+          portfolioPositions = j.positions;
+          savePortfolio();
+          renderPortfolio();
+        }
+      }
+    } catch { /* non-fatal — localStorage already has what's local */ }
+  }
 
   // Home painted before probeBridge() resolved, so its BRIDGE pip was still
   // showing offline and it had no quotes yet — refresh both now.

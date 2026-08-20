@@ -54,16 +54,18 @@ def _request(token, method, path, body=None):
     except urllib.error.HTTPError as exc:
         raw = exc.read()
         message = str(exc)
+        code = None
         try:
             payload = json.loads(raw)
             message = payload.get("message") or message
+            code = payload.get("code")
         except (json.JSONDecodeError, ValueError):
             pass
         # Notion's own codes for "the token no longer works" / "not shared
         # with the integration" / "the page/db was deleted" — surfaced as a
         # status so excel_bridge.py can turn this into one clear message
         # instead of a stack trace, whichever of the three it turns out to be.
-        return False, {"status": exc.code, "message": message}
+        return False, {"status": exc.code, "message": message, "code": code}
     except urllib.error.URLError as exc:
         return False, {"status": 0, "message": str(getattr(exc, "reason", exc))}
 
@@ -364,9 +366,10 @@ def error_message(err):
         return str(err)
     status = err.get("status")
     detail = err.get("message") or "Unknown error."
-    if status in (401, 403):
-        return ("Notion rejected the connection — the integration token may have been "
-                "revoked, or this database isn't shared with it anymore. " + detail)
+    if status == 401:
+        return "Notion rejected the connection — the integration token may have been revoked. Reconnect it and try again. " + detail
+    if status == 403:
+        return "This integration doesn't have permission for that — check the database or page is still shared with it in Notion. " + detail
     if status == 404:
         return "That Notion page or database no longer exists. " + detail
     if status == 0:
