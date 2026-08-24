@@ -1610,6 +1610,7 @@ footer.legal code {
           <input id="sellZoneHigh" class="calc-input" type="text" inputmode="decimal" autocomplete="off" placeholder="0" data-zone="sell-high">
         </div>
       </div>
+      <div id="upsideBlock" class="upside-block"></div>
     </div>
   </div>
 
@@ -2307,6 +2308,7 @@ function onCompanyEdit(ev) {
   // is never rebuilt, reformatted, or defocused mid-keystroke.
   renderChart();
   renderSummary();
+  renderUpside();
   updateDerivedCells();
   updateDerivedKPI();
 }
@@ -2325,6 +2327,68 @@ function onZoneEdit(ev) {
   zones[side][bound] = isFinite(raw) ? raw : 0;
   persist();
   renderChart();
+  renderUpside();
+}
+
+/* ── Upside: what the 2030 projection implies as a return from a reference
+   price — the buy zone (an assumed entry) and/or the ticker's live quote.
+   Live quote is fetched fresh from the bridge, never persisted with the
+   projection (same treatment as Portfolio's live quotes). */
+let liveQuote = null;   // { price, change, changePct } | null
+
+async function fetchProjectionQuote() {
+  const ticker = (company.ticker || "").trim().toUpperCase();
+  if (!bridgeUp || !ticker) { liveQuote = null; renderUpside(); return; }
+  try {
+    const res = await fetch(BRIDGE + "/api/watchlist?tickers=" + encodeURIComponent(ticker));
+    if (!res.ok) throw new Error("bad response");
+    const data = await res.json();
+    const q = (data.quotes || [])[0];
+    liveQuote = (q && !q.error && q.price > 0) ? q : null;
+  } catch { liveQuote = null; }
+  renderUpside();
+}
+
+/** { base, bear, bull } upside fractions of 2030 priceMid vs. refPrice, or null. */
+function computeUpside(refPrice) {
+  if (!(refPrice > 0)) return null;
+  const out = {};
+  for (const k of ["base", "bear", "bull"]) {
+    out[k] = (results[k].priceMid[NY - 1] - refPrice) / refPrice;
+  }
+  return out;
+}
+
+function upsideRow(label, refPrice) {
+  const up = computeUpside(refPrice);
+  if (!up) return "";
+  const cell = (k) => {
+    const v = up[k];
+    const color = v >= 0 ? "#35c294" : "#ff8f8f";
+    return `<td style="color:${color}">${fmtPct(v)}</td>`;
+  };
+  return `<tr><th>${label}</th>${["base", "bear", "bull"].map(cell).join("")}</tr>`;
+}
+
+function renderUpside() {
+  const host = document.getElementById("upsideBlock");
+  if (!host) return;
+  if (!hasData()) { host.innerHTML = ""; return; }
+
+  const buyMid = (zones.buy.low > 0 && zones.buy.high > 0) ? (zones.buy.low + zones.buy.high) / 2 : 0;
+  const rows = upsideRow("From buy zone", buyMid) + upsideRow("From market price", liveQuote?.price || 0);
+
+  if (!rows) {
+    host.innerHTML = `<span class="hint">Set a buy zone, or wait for a live quote, to see upside to the 2030 projection.</span>`;
+    return;
+  }
+  host.innerHTML = `
+    <div class="table-scroll">
+      <table class="summary">
+        <thead><tr><th>Upside to 2030</th><th>Base</th><th>Bear</th><th>Bull</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
 }
 
 let lastMarginPct = null;
@@ -2578,6 +2642,7 @@ function loadProjectById(id) {
   clearLogForm();
   renderNotionUI();
   persist();
+  fetchProjectionQuote();
   return true;
 }
 
@@ -2606,6 +2671,7 @@ function startNewProject() {
   assumptions.bear = mkAssumptions(0.03, 8, 12);
   assumptions.bull = mkAssumptions(0.18, 20, 28);
   zones = { buy: { low: 0, high: 0 }, sell: { low: 0, high: 0 } };
+  liveQuote = null;
   locked = false;
   nw = { ...NW_DEFAULTS };
   nwLog = [];
@@ -3671,6 +3737,7 @@ function onCellEdit(ev) {
   // comment for why this never touches the input you're typing in.
   renderChart();
   renderSummary();
+  renderUpside();
   updateDerivedCells();
   updateDerivedKPI();
 }
@@ -3700,6 +3767,7 @@ function fillRow(sc, field) {
   persist();
   renderChart();
   renderSummary();
+  renderUpside();
   updateDerivedCells();
   updateDerivedKPI();
 }
@@ -5137,6 +5205,7 @@ function applyPeriodUI() {
 function renderAll() {
   renderKPIs();
   renderZoneInputs();
+  renderUpside();
   renderChart(true);
   renderSummary();
   renderScenarios();
@@ -5206,6 +5275,7 @@ document.getElementById("btnDismiss").addEventListener("click", () => {
 document.getElementById("ticker").addEventListener("change", (e) => {
   company.ticker = e.target.value.trim().toUpperCase();
   persist();
+  fetchProjectionQuote();
 });
 window.addEventListener("resize", () => { if (hoverIdx !== null) hideTooltip(); });
 
@@ -6757,6 +6827,7 @@ if (!bootedFromProject) {
   const up = await probeBridge();
   if (up) await syncFromBridge();   // pick up anything saved on another machine
   initWatchlist(up);
+  fetchProjectionQuote();   // Home painted before this resolved — get the live price now
 
   // Portfolio has no natural per-position id to diff like projects do, so
   // this is a whole-list "newer wins" merge rather than a per-record one:
