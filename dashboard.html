@@ -1584,6 +1584,35 @@ footer.legal code {
     </span>
   </div>
 
+  <!-- ── Buy / Sell Zone ──────────────────────────────────────────────── -->
+  <div class="section-head">
+    <h2>Buy / Sell Zone</h2>
+    <span class="hint">Price bands for this projection — shown on the Share Price chart</span>
+    <span class="rule"></span>
+  </div>
+  <div class="card">
+    <div class="card-body">
+      <div class="nwlog-form" id="zoneForm">
+        <div class="calc-field">
+          <label for="buyZoneLow">Buy zone low ($)</label>
+          <input id="buyZoneLow" class="calc-input" type="text" inputmode="decimal" autocomplete="off" placeholder="0" data-zone="buy-low">
+        </div>
+        <div class="calc-field">
+          <label for="buyZoneHigh">Buy zone high ($)</label>
+          <input id="buyZoneHigh" class="calc-input" type="text" inputmode="decimal" autocomplete="off" placeholder="0" data-zone="buy-high">
+        </div>
+        <div class="calc-field">
+          <label for="sellZoneLow">Sell zone low ($)</label>
+          <input id="sellZoneLow" class="calc-input" type="text" inputmode="decimal" autocomplete="off" placeholder="0" data-zone="sell-low">
+        </div>
+        <div class="calc-field">
+          <label for="sellZoneHigh">Sell zone high ($)</label>
+          <input id="sellZoneHigh" class="calc-input" type="text" inputmode="decimal" autocomplete="off" placeholder="0" data-zone="sell-high">
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="card">
     <div class="chart-wrap">
       <svg id="chart" viewBox="0 0 920 340" role="img" aria-labelledby="chartTitle chartDesc" tabindex="0">
@@ -2092,6 +2121,25 @@ const assumptions = {
   bull: mkAssumptions(0.18, 20, 28),
 };
 
+/* Buy/sell zone — a price band the user sets by hand per projection, shown
+   as shaded rects on the Share Price chart. Not derived from the model. */
+let zones = {
+  buy:  { low: 0, high: 0 },
+  sell: { low: 0, high: 0 },
+};
+function cloneZones() { return JSON.parse(JSON.stringify(zones)); }
+function normalizeZones(z) {
+  const out = { buy: { low: 0, high: 0 }, sell: { low: 0, high: 0 } };
+  for (const k of ["buy", "sell"]) {
+    if (z && z[k]) {
+      const lo = Number(z[k].low), hi = Number(z[k].high);
+      out[k].low = isFinite(lo) ? lo : 0;
+      out[k].high = isFinite(hi) ? hi : 0;
+    }
+  }
+  return out;
+}
+
 let dataSource = "sample";   // sample | workbook | manual | api
 let bridgeUp = false;
 let authEnabled = false;
@@ -2263,6 +2311,22 @@ function onCompanyEdit(ev) {
   updateDerivedKPI();
 }
 
+/* ── Buy/Sell zone ──────────────────────────────────────────────────────── */
+function renderZoneInputs() {
+  document.getElementById("buyZoneLow").value   = zones.buy.low   || "";
+  document.getElementById("buyZoneHigh").value  = zones.buy.high  || "";
+  document.getElementById("sellZoneLow").value  = zones.sell.low  || "";
+  document.getElementById("sellZoneHigh").value = zones.sell.high || "";
+}
+function onZoneEdit(ev) {
+  const inp = ev.target;
+  const [side, bound] = inp.dataset.zone.split("-"); // "buy"|"sell", "low"|"high"
+  const raw = parseFloat(sanitizeNumericInput(inp));
+  zones[side][bound] = isFinite(raw) ? raw : 0;
+  persist();
+  renderChart();
+}
+
 let lastMarginPct = null;
 function updateDerivedKPI() {
   const margin = safeDiv(company.netIncome, company.revenue);
@@ -2317,7 +2381,7 @@ let savedSnapshot = null;   // stateJSON() at last load/save, for the dirty chec
 function persist() {
   try {
     localStorage.setItem(STORE_KEY, JSON.stringify({
-      company, assumptions, locked, dataSource, netWorth: nw, netWorthLog: nwLog, savedAt: Date.now(),
+      company, assumptions, zones, locked, dataSource, netWorth: nw, netWorthLog: nwLog, savedAt: Date.now(),
     }));
   } catch { /* private mode / quota — non-fatal */ }
   updateDirtyUI();
@@ -2342,6 +2406,7 @@ function restore() {
     }
     if (s.netWorth && typeof s.netWorth === "object") nw = normalizeNW(s.netWorth);
     if (Array.isArray(s.netWorthLog)) nwLog = normalizeNWLog(s.netWorthLog);
+    zones = normalizeZones(s.zones);
     dataSource = s.dataSource === "sample" ? "sample" : (s.dataSource || "manual");
     return true;
   } catch { return false; }
@@ -2367,7 +2432,7 @@ function cloneAssumptions() {
   return JSON.parse(JSON.stringify(assumptions));
 }
 function stateJSON() {
-  return JSON.stringify({ company, assumptions, locked, netWorth: nw, netWorthLog: nwLog });
+  return JSON.stringify({ company, assumptions, zones, locked, netWorth: nw, netWorthLog: nwLog });
 }
 function markClean() { savedSnapshot = stateJSON(); updateDirtyUI(); }
 function isDirty() { return currentProjectId !== null && stateJSON() !== savedSnapshot; }
@@ -2452,7 +2517,7 @@ function saveAsNew(name) {
   const now = Date.now();
   map[id] = {
     id, name: name.trim() || "Untitled", ticker: company.ticker,
-    company: { ...company }, assumptions: cloneAssumptions(), locked,
+    company: { ...company }, assumptions: cloneAssumptions(), zones: cloneZones(), locked,
     netWorth: { ...nw }, netWorthLog: nwLog.map(e => ({ ...e })),
     notion: { ...notionState }, notionNotes: notionNotesText,
     createdAt: now, updatedAt: now,
@@ -2471,7 +2536,7 @@ function saveOverActive() {
   if (!existing) return false;
   map[currentProjectId] = {
     ...existing, ticker: company.ticker,
-    company: { ...company }, assumptions: cloneAssumptions(), locked,
+    company: { ...company }, assumptions: cloneAssumptions(), zones: cloneZones(), locked,
     netWorth: { ...nw }, netWorthLog: nwLog.map(e => ({ ...e })),
     notion: { ...notionState }, notionNotes: notionNotesText,
     updatedAt: Date.now(),
@@ -2502,6 +2567,7 @@ function loadProjectById(id) {
       }
     }
   }
+  zones = normalizeZones(p.zones);
   dataSource = (company.revenue || company.netIncome || company.eps) ? "manual" : "sample";
   setActiveProject(id);
   markClean();
@@ -2522,6 +2588,7 @@ function hasWorkWorthKeeping() {
   if (currentProjectId) return isDirty();
   if (nw.start || nw.income || nw.expenses) return true;
   if (nwLog.length) return true;
+  if (zones.buy.low || zones.buy.high || zones.sell.low || zones.sell.high) return true;
   if (dataSource === "sample") return false;
   return !!(company.revenue || company.netIncome || company.eps || company.shares);
 }
@@ -2538,6 +2605,7 @@ function startNewProject() {
   assumptions.base = mkAssumptions(0.10, 20, 30);
   assumptions.bear = mkAssumptions(0.03, 8, 12);
   assumptions.bull = mkAssumptions(0.18, 20, 28);
+  zones = { buy: { low: 0, high: 0 }, sell: { low: 0, high: 0 } };
   locked = false;
   nw = { ...NW_DEFAULTS };
   nwLog = [];
@@ -3209,13 +3277,39 @@ function renderChart(animate = false) {
     return;
   }
 
-  const dataMax = Math.max(...allVals);
-  const dataMin = Math.min(0, ...allVals);
+  // Buy/sell zones are price bands, so they only apply to the Share Price
+  // metric — and widen the axis domain so an out-of-range zone still shows.
+  const zoneVals = metric === "priceMid"
+    ? [zones.buy.low, zones.buy.high, zones.sell.low, zones.sell.high].filter(v => v > 0)
+    : [];
+  const dataMax = Math.max(...allVals, ...zoneVals);
+  const dataMin = Math.min(0, ...allVals, ...zoneVals);
   const ticks = niceTicks(dataMin, dataMax, 5);
   const yMin = ticks[0], yMax = ticks[ticks.length - 1];
 
   const X = (i) => PAD.l + (plotW * i) / (NY - 1);
   const Y = (v) => PAD.t + plotH - ((v - yMin) / (yMax - yMin || 1)) * plotH;
+
+  // zone bands — shaded behind the gridlines so the grid still reads through
+  if (metric === "priceMid") {
+    const gZones = el("g");
+    const bands = [
+      { z: zones.buy,  fill: "rgba(6,176,122,.14)",  stroke: "rgba(6,176,122,.55)",  label: "Buy zone" },
+      { z: zones.sell, fill: "rgba(212,50,50,.14)", stroke: "rgba(212,50,50,.55)", label: "Sell zone" },
+    ];
+    for (const b of bands) {
+      const lo = Math.min(b.z.low, b.z.high), hi = Math.max(b.z.low, b.z.high);
+      if (!(hi > 0) || hi === lo) continue;
+      const y1 = Y(hi), y2 = Y(lo);
+      gZones.append(el("rect", { x: PAD.l, y: y1, width: plotW, height: Math.max(1, y2 - y1),
+        fill: b.fill, stroke: b.stroke, "stroke-width": "1", "stroke-dasharray": "4 3" }));
+      const lab = el("text", { x: PAD.l + 6, y: Math.min(y1 + 13, y2 - 4), fill: b.stroke,
+        "font-size": "10.5", "font-family": "inherit", "font-weight": "600" });
+      lab.textContent = b.label;
+      gZones.append(lab);
+    }
+    svg.append(gZones);
+  }
 
   const gGrid = el("g");
   // horizontal gridlines — solid hairlines, one shade off the surface
@@ -5042,6 +5136,7 @@ function applyPeriodUI() {
 
 function renderAll() {
   renderKPIs();
+  renderZoneInputs();
   renderChart(true);
   renderSummary();
   renderScenarios();
@@ -6579,6 +6674,10 @@ document.addEventListener("keydown", (e) => {
 
 document.querySelectorAll("[data-calc]").forEach(inp => {
   inp.addEventListener("input", onCalcInput);
+  inp.addEventListener("focus", () => inp.select());
+});
+document.querySelectorAll("[data-zone]").forEach(inp => {
+  inp.addEventListener("input", onZoneEdit);
   inp.addEventListener("focus", () => inp.select());
 });
 document.getElementById("btnCalcRun").addEventListener("click", () => {
