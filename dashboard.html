@@ -826,10 +826,28 @@ textarea.notion-notes:not([disabled]):placeholder-shown { background: var(--gold
 
 .donut-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
 @media (max-width: 760px) { .donut-row { grid-template-columns: 1fr; } }
-.options-chain-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
-@media (max-width: 760px) { .options-chain-grid { grid-template-columns: 1fr; } }
-table.summary td.opt-strike { text-align: left; font-weight: 700; }
-table.summary tr.opt-itm { background: rgba(255,255,255,.035); }
+#optionsChainGrid { margin-top: 16px; }
+table.opt-chain thead tr:first-child th { padding-top: 6px; padding-bottom: 6px; }
+table.opt-chain th.opt-side-head {
+  text-align: center; font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+  border-bottom: 1px solid var(--hairline);
+}
+table.opt-chain th.opt-side-call { color: #35c294; }
+table.opt-chain th.opt-side-put  { color: #ff8f8f; }
+table.opt-chain th.opt-strike-head, table.opt-chain td.opt-strike {
+  text-align: center; background: rgba(255,255,255,.035);
+  border-left: 1px solid var(--hairline); border-right: 1px solid var(--hairline);
+}
+table.opt-chain td.opt-strike { font-weight: 700; }
+table.opt-chain td.opt-bid { color: #35c294; }
+table.opt-chain td.opt-ask { color: #ff8f8f; }
+table.opt-chain td.opt-itm { background: rgba(255,255,255,.1); }
+table.opt-chain tr.opt-price-row td {
+  background: rgba(255,255,255,.05); padding: 8px 13px; font-weight: 700;
+  border-top: 1px solid var(--hairline); border-bottom: 1px solid var(--hairline);
+}
+table.opt-chain tr.opt-price-row .opt-price-ticker { color: var(--text-muted); font-weight: 700; margin-right: 10px; }
+table.opt-chain tr.opt-price-row .opt-price-val { margin-right: 8px; }
 .donut-card-body {
   display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
   padding: 18px;
@@ -2080,34 +2098,23 @@ footer.legal code {
       <div id="optionsExpRow" class="watchlist-range-row" role="tablist" aria-label="Expiration date" style="margin-top:16px" hidden></div>
       <div id="optionsChainStatus" class="watchlist-chart-status"></div>
 
-      <div class="options-chain-grid" id="optionsChainGrid" hidden>
-        <div>
-          <div class="card-head" style="padding:0 0 6px">
-            <span class="scenario-chip" style="color:#35c294">Calls</span>
-          </div>
-          <div class="table-scroll">
-            <table class="summary" id="optionsCallsTable">
-              <thead><tr>
-                <th style="text-align:left">Strike</th><th>Last</th><th>Bid</th><th>Ask</th>
-                <th>IV</th><th>OI</th><th>Vol</th><th></th>
-              </tr></thead>
-              <tbody id="optionsCallsBody"></tbody>
-            </table>
-          </div>
-        </div>
-        <div>
-          <div class="card-head" style="padding:0 0 6px">
-            <span class="scenario-chip" style="color:#ff8f8f">Puts</span>
-          </div>
-          <div class="table-scroll">
-            <table class="summary" id="optionsPutsTable">
-              <thead><tr>
-                <th style="text-align:left">Strike</th><th>Last</th><th>Bid</th><th>Ask</th>
-                <th>IV</th><th>OI</th><th>Vol</th><th></th>
-              </tr></thead>
-              <tbody id="optionsPutsBody"></tbody>
-            </table>
-          </div>
+      <div id="optionsChainGrid" hidden>
+        <div class="table-scroll">
+          <table class="summary opt-chain" id="optionsChainTable">
+            <thead>
+              <tr>
+                <th colspan="8" class="opt-side-head opt-side-call">Calls</th>
+                <th class="opt-strike-head">Strike</th>
+                <th colspan="8" class="opt-side-head opt-side-put">Puts</th>
+              </tr>
+              <tr>
+                <th></th><th>Vol</th><th>Bid</th><th>Ask</th><th>Last</th><th>Mid</th><th>IV</th><th>OI</th>
+                <th></th>
+                <th>Bid</th><th>Ask</th><th>Last</th><th>Mid</th><th>IV</th><th>OI</th><th>Vol</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="optionsChainBody"></tbody>
+          </table>
         </div>
       </div>
     </div>
@@ -4089,6 +4096,7 @@ let optionsTicker = null;
 let optionsExpirations = [];
 let optionsExpiration = null;
 let optionsChain = null;      // { calls: [...], puts: [...] } | null
+let optionsUnderlyingQuote = null;   // {price, change, changePct} for the searched ticker | null
 let optionsContracts = [];    // [{contractSymbol, ticker, expiration, type, strike}]
 let optionsQuoteMap = {};     // contractSymbol -> quote (same shape as watchlistQuoteMap)
 let optionsTimer = null;
@@ -4104,6 +4112,7 @@ async function searchOptions(rawTicker) {
   optionsExpiration = null;
   optionsChain = null;
   optionsExpirations = [];
+  optionsUnderlyingQuote = null;
   document.getElementById("optionsChainGrid").hidden = true;
   const expRow = document.getElementById("optionsExpRow");
   expRow.hidden = true;
@@ -4111,6 +4120,7 @@ async function searchOptions(rawTicker) {
   const statusEl = document.getElementById("optionsChainStatus");
   statusEl.textContent = "Loading expirations…";
   statusEl.className = "watchlist-chart-status";
+  fetchOptionsUnderlyingQuote(ticker);   // fire-and-forget — the chain still renders without it
   try {
     const res = await fetch(BRIDGE + "/api/options/expirations?ticker=" + encodeURIComponent(ticker));
     const j = await res.json();
@@ -4124,6 +4134,25 @@ async function searchOptions(rawTicker) {
     if (ticker !== optionsTicker) return;
     statusEl.textContent = "Couldn't load options — " + String(e.message || e);
     statusEl.className = "watchlist-chart-status err";
+  }
+}
+
+// Fetches the underlying's live quote for the price-divider row — reuses
+// the existing generic watchlist quote endpoint, which never required the
+// ticker to already be on the saved watchlist. Fire-and-forget from
+// searchOptions(): the chain itself doesn't wait on this, and re-renders
+// (adding/repositioning the divider row) whenever it resolves.
+async function fetchOptionsUnderlyingQuote(ticker) {
+  try {
+    const res = await fetch(BRIDGE + "/api/watchlist?tickers=" + encodeURIComponent(ticker));
+    const j = await res.json();
+    if (!res.ok) throw new Error(j.error || ("HTTP " + res.status));
+    if (ticker !== optionsTicker) return;   // superseded by a newer search
+    const q = (j.quotes || [])[0];
+    optionsUnderlyingQuote = (q && !q.error && q.price != null) ? q : null;
+    renderOptionsChain();
+  } catch {
+    if (ticker === optionsTicker) optionsUnderlyingQuote = null;
   }
 }
 
@@ -4162,31 +4191,94 @@ async function selectOptionsExpiration(exp) {
   }
 }
 
-function optionChainRowHtml(row, type) {
+// Groups calls/puts by strike into one row per strike — a strike missing
+// on one side just renders blank cells there instead of a missing row,
+// matching a real chain where calls and puts don't always list identical
+// strikes.
+function buildStrikeRows(chain) {
+  const byStrike = new Map();
+  const put = (arr, key) => (arr || []).forEach(r => {
+    if (!byStrike.has(r.strike)) byStrike.set(r.strike, { strike: r.strike, call: null, put: null });
+    byStrike.get(r.strike)[key] = r;
+  });
+  put(chain.calls, "call");
+  put(chain.puts, "put");
+  return [...byStrike.values()].sort((a, b) => a.strike - b.strike);
+}
+
+// Renders the 8-cell block for one side of one strike row. Column order is
+// Bid/Ask/Last/Mid/IV/OI (kept adjacent to the shared Strike column on both
+// sides), with our two extra columns (Vol, Add) pushed to the outer edge —
+// Add,Vol first for calls, Vol,Add last for puts.
+function optionSideCells(row, type, currentPrice) {
+  if (!row) return "<td></td>".repeat(8);
+
   const tracked = optionsContractSet().has(row.contractSymbol);
-  const iv = row.impliedVolatility != null ? (row.impliedVolatility * 100).toFixed(1) + "%" : EMDASH;
   const cell = (v, fmt) => v == null ? EMDASH : fmt(v);
-  return `<tr class="${row.inTheMoney ? "opt-itm" : ""}">
-    <td class="opt-strike">$${row.strike.toFixed(2)}</td>
-    <td>${cell(row.lastPrice, v => "$" + v.toFixed(2))}</td>
-    <td>${cell(row.bid, v => "$" + v.toFixed(2))}</td>
-    <td>${cell(row.ask, v => "$" + v.toFixed(2))}</td>
-    <td>${iv}</td>
-    <td>${cell(row.openInterest, v => v.toLocaleString())}</td>
-    <td>${cell(row.volume, v => v.toLocaleString())}</td>
-    <td><button type="button" class="fill-btn" data-add-contract="${row.contractSymbol}" data-type="${type}"
-      ${tracked ? "disabled" : ""}>${tracked ? "Added" : "+ Add"}</button></td>
-  </tr>`;
+  const money = v => cell(v, x => "$" + x.toFixed(2));
+  const mid = (row.bid != null && row.ask != null) ? (row.bid + row.ask) / 2 : null;
+  const iv = row.impliedVolatility != null ? (row.impliedVolatility * 100).toFixed(1) + "%" : EMDASH;
+  const itm = currentPrice != null
+    ? (type === "call" ? row.strike < currentPrice : row.strike > currentPrice)
+    : !!row.inTheMoney;
+  const itmCls = itm ? " opt-itm" : "";
+
+  const priceCells = `
+    <td class="opt-bid${itmCls}">${money(row.bid)}</td>
+    <td class="opt-ask${itmCls}">${money(row.ask)}</td>
+    <td class="${itm ? "opt-itm" : ""}">${money(row.lastPrice)}</td>
+    <td class="${itm ? "opt-itm" : ""}">${money(mid)}</td>
+    <td class="${itm ? "opt-itm" : ""}">${iv}</td>
+    <td class="${itm ? "opt-itm" : ""}">${cell(row.openInterest, v => v.toLocaleString())}</td>`;
+  const volCell = `<td class="${itm ? "opt-itm" : ""}">${cell(row.volume, v => v.toLocaleString())}</td>`;
+  const addCell = `<td><button type="button" class="fill-btn" data-add-contract="${row.contractSymbol}" data-type="${type}"
+    ${tracked ? "disabled" : ""}>${tracked ? "Added" : "+ Add"}</button></td>`;
+
+  return type === "call" ? (addCell + volCell + priceCells) : (priceCells + volCell + addCell);
+}
+
+function optionsPriceRowHtml() {
+  const q = optionsUnderlyingQuote;
+  if (!q) return "";
+  const dir = q.changePct > 0 ? "up" : q.changePct < 0 ? "down" : "flat";
+  const sign = q.changePct > 0 ? "+" : "";
+  return `<tr class="opt-price-row"><td colspan="17">
+    <span class="opt-price-ticker">${optionsTicker}</span>
+    <span class="opt-price-val">$${q.price.toFixed(2)}</span>
+    <span class="wl-change ${dir}">${sign}${q.change.toFixed(2)} (${sign}${q.changePct.toFixed(2)}%)</span>
+  </td></tr>`;
 }
 
 function renderOptionsChain() {
   if (!optionsChain) return;
-  const emptyRow = (label) => `<tr><td colspan="8" style="color:var(--text-muted)">No ${label} for this expiration.</td></tr>`;
-  document.getElementById("optionsCallsBody").innerHTML =
-    optionsChain.calls.map(r => optionChainRowHtml(r, "call")).join("") || emptyRow("calls");
-  document.getElementById("optionsPutsBody").innerHTML =
-    optionsChain.puts.map(r => optionChainRowHtml(r, "put")).join("") || emptyRow("puts");
-  document.getElementById("optionsChainGrid").hidden = false;
+  const grid = document.getElementById("optionsChainGrid");
+  const rows = buildStrikeRows(optionsChain);
+
+  if (!rows.length) {
+    document.getElementById("optionsChainBody").innerHTML =
+      `<tr><td colspan="17" style="color:var(--text-muted);text-align:center;padding:24px">No options found for this expiration.</td></tr>`;
+    grid.hidden = false;
+    return;
+  }
+
+  const price = optionsUnderlyingQuote ? optionsUnderlyingQuote.price : null;
+  let dividerPlaced = price == null;   // no live price -> never insert a divider row
+  const html = [];
+  for (const r of rows) {
+    if (!dividerPlaced && r.strike >= price) {
+      html.push(optionsPriceRowHtml());
+      dividerPlaced = true;
+    }
+    html.push(`<tr>
+      ${optionSideCells(r.call, "call", price)}
+      <td class="opt-strike">$${r.strike.toFixed(2)}</td>
+      ${optionSideCells(r.put, "put", price)}
+    </tr>`);
+  }
+  if (!dividerPlaced) html.push(optionsPriceRowHtml());   // price above every listed strike
+
+  document.getElementById("optionsChainBody").innerHTML = html.join("");
+  grid.hidden = false;
 }
 
 async function saveOptionsWatchlist(contracts) {
