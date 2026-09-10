@@ -826,6 +826,10 @@ textarea.notion-notes:not([disabled]):placeholder-shown { background: var(--gold
 
 .donut-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
 @media (max-width: 760px) { .donut-row { grid-template-columns: 1fr; } }
+.options-chain-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
+@media (max-width: 760px) { .options-chain-grid { grid-template-columns: 1fr; } }
+table.summary td.opt-strike { text-align: left; font-weight: 700; }
+table.summary tr.opt-itm { background: rgba(255,255,255,.035); }
 .donut-card-body {
   display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
   padding: 18px;
@@ -1370,6 +1374,16 @@ footer.legal code {
           <span>
             <span class="pm-name">Portfolio Tracker</span>
             <span class="pm-sub">Track and aggregate your positions</span>
+          </span>
+          <svg class="pm-check" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M3 8.5 6.5 12 13 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <button class="product-item" role="menuitem" data-view="options">
+          <span class="pm-mark" style="background:linear-gradient(145deg,#d98fe0,#8a3fa0);color:#1c0d20">OP</span>
+          <span>
+            <span class="pm-name">Options Watchlist</span>
+            <span class="pm-sub">Search chains, track contracts, chart performance</span>
           </span>
           <svg class="pm-check" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path d="M3 8.5 6.5 12 13 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
@@ -2038,6 +2052,85 @@ footer.legal code {
           <button id="btnPortfolioAddConfirm" class="btn btn-primary" type="button">Add Position</button>
           <button class="btn btn-ghost" type="button" data-close-modal>Cancel</button>
         </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Options Watchlist ─────────────────────────────────────────────────── -->
+<div id="viewOptions" hidden>
+  <div class="section-head">
+    <h2>Options Watchlist</h2>
+    <span class="hint">Search a ticker's option chain, add contracts to track, and chart their performance</span>
+    <span class="rule"></span>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><h3>Search Options</h3></div>
+    <div class="card-body">
+      <form id="optionsSearchForm" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+        <div class="calc-field" style="margin-bottom:0;flex:1;min-width:160px">
+          <label for="optionsSearchInput">Ticker</label>
+          <input id="optionsSearchInput" class="calc-input" type="text" maxlength="10"
+            autocomplete="off" spellcheck="false" placeholder="e.g., AAPL" style="text-transform:uppercase">
+        </div>
+        <button type="submit" class="btn btn-primary" style="padding:9px 18px">Search</button>
+      </form>
+
+      <div id="optionsExpRow" class="watchlist-range-row" role="tablist" aria-label="Expiration date" style="margin-top:16px" hidden></div>
+      <div id="optionsChainStatus" class="watchlist-chart-status"></div>
+
+      <div class="options-chain-grid" id="optionsChainGrid" hidden>
+        <div>
+          <div class="card-head" style="padding:0 0 6px">
+            <span class="scenario-chip" style="color:#35c294">Calls</span>
+          </div>
+          <div class="table-scroll">
+            <table class="summary" id="optionsCallsTable">
+              <thead><tr>
+                <th style="text-align:left">Strike</th><th>Last</th><th>Bid</th><th>Ask</th>
+                <th>IV</th><th>OI</th><th>Vol</th><th></th>
+              </tr></thead>
+              <tbody id="optionsCallsBody"></tbody>
+            </table>
+          </div>
+        </div>
+        <div>
+          <div class="card-head" style="padding:0 0 6px">
+            <span class="scenario-chip" style="color:#ff8f8f">Puts</span>
+          </div>
+          <div class="table-scroll">
+            <table class="summary" id="optionsPutsTable">
+              <thead><tr>
+                <th style="text-align:left">Strike</th><th>Last</th><th>Bid</th><th>Ask</th>
+                <th>IV</th><th>OI</th><th>Vol</th><th></th>
+              </tr></thead>
+              <tbody id="optionsPutsBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-head">
+    <h2>Tracked Contracts</h2>
+    <span class="hint">Live price and today's change — click a row to open its price chart</span>
+    <span class="rule"></span>
+  </div>
+  <div class="card">
+    <div class="card-body" style="padding:4px 6px 6px">
+      <div id="optionsWatchlistEmpty" style="padding:32px;text-align:center;color:var(--text-muted)">
+        <p style="margin:0;font-size:14px">No contracts tracked yet — search a ticker above and add one.</p>
+      </div>
+      <div class="table-scroll" id="optionsWatchlistTableWrap" hidden>
+        <table class="summary" id="optionsWatchlistTable">
+          <thead><tr>
+            <th style="text-align:left">Contract</th><th style="text-align:left">Expires</th>
+            <th>Price</th><th style="width:24px"></th>
+          </tr></thead>
+          <tbody id="optionsWatchlistBody"></tbody>
+        </table>
       </div>
     </div>
   </div>
@@ -3960,7 +4053,7 @@ document.getElementById("watchlistSearchForm").addEventListener("submit", (ev) =
   input.blur();
 });
 document.getElementById("btnWatchlistModalAdd").addEventListener("click", async () => {
-  if (!watchlistChartTicker) return;
+  if (!watchlistChartTicker || watchlistChartMode !== "stock") return;
   await addWatchlistTicker(watchlistChartTicker);
   document.getElementById("btnWatchlistModalAdd").hidden = watchlistTickers.includes(watchlistChartTicker);
 });
@@ -3991,6 +4084,228 @@ watchlistAddInput.addEventListener("blur", () => {
   setTimeout(() => { if (!watchlistAddForm.hidden) closeWatchlistAddForm(); }, 150);
 });
 
+/* ── Options Watchlist: search a ticker's chain, track specific contracts ─── */
+let optionsTicker = null;
+let optionsExpirations = [];
+let optionsExpiration = null;
+let optionsChain = null;      // { calls: [...], puts: [...] } | null
+let optionsContracts = [];    // [{contractSymbol, ticker, expiration, type, strike}]
+let optionsQuoteMap = {};     // contractSymbol -> quote (same shape as watchlistQuoteMap)
+let optionsTimer = null;
+
+function optionsContractSet() {
+  return new Set(optionsContracts.map(c => c.contractSymbol));
+}
+
+async function searchOptions(rawTicker) {
+  const ticker = (rawTicker || "").trim().toUpperCase();
+  if (!ticker) return;
+  optionsTicker = ticker;
+  optionsExpiration = null;
+  optionsChain = null;
+  optionsExpirations = [];
+  document.getElementById("optionsChainGrid").hidden = true;
+  const expRow = document.getElementById("optionsExpRow");
+  expRow.hidden = true;
+  expRow.innerHTML = "";
+  const statusEl = document.getElementById("optionsChainStatus");
+  statusEl.textContent = "Loading expirations…";
+  statusEl.className = "watchlist-chart-status";
+  try {
+    const res = await fetch(BRIDGE + "/api/options/expirations?ticker=" + encodeURIComponent(ticker));
+    const j = await res.json();
+    if (!res.ok || j.error) throw new Error(j.error || ("HTTP " + res.status));
+    if (ticker !== optionsTicker) return;   // superseded by a newer search
+    optionsExpirations = j.expirations || [];
+    if (!optionsExpirations.length) throw new Error("No options found for this ticker.");
+    statusEl.textContent = "";
+    await selectOptionsExpiration(optionsExpirations[0]);
+  } catch (e) {
+    if (ticker !== optionsTicker) return;
+    statusEl.textContent = "Couldn't load options — " + String(e.message || e);
+    statusEl.className = "watchlist-chart-status err";
+  }
+}
+
+function renderOptionsExpirations() {
+  const row = document.getElementById("optionsExpRow");
+  row.innerHTML = optionsExpirations.map(exp => `
+    <button type="button" class="wl-range-btn${exp === optionsExpiration ? " is-active" : ""}"
+      data-exp="${exp}" role="tab" aria-selected="${exp === optionsExpiration}">${exp}</button>
+  `).join("");
+  row.hidden = false;
+}
+
+async function selectOptionsExpiration(exp) {
+  optionsExpiration = exp;
+  renderOptionsExpirations();
+  const statusEl = document.getElementById("optionsChainStatus");
+  const grid = document.getElementById("optionsChainGrid");
+  statusEl.textContent = "Loading chain…";
+  statusEl.className = "watchlist-chart-status";
+  grid.hidden = true;
+  const ticker = optionsTicker;
+  try {
+    const url = BRIDGE + "/api/options/chain?ticker=" + encodeURIComponent(ticker)
+      + "&expiration=" + encodeURIComponent(exp);
+    const res = await fetch(url);
+    const j = await res.json();
+    if (!res.ok || j.error) throw new Error(j.error || ("HTTP " + res.status));
+    if (ticker !== optionsTicker || exp !== optionsExpiration) return;   // superseded
+    optionsChain = { calls: j.calls || [], puts: j.puts || [] };
+    renderOptionsChain();
+    statusEl.textContent = "";
+  } catch (e) {
+    if (ticker !== optionsTicker || exp !== optionsExpiration) return;
+    statusEl.textContent = "Couldn't load the chain — " + String(e.message || e);
+    statusEl.className = "watchlist-chart-status err";
+  }
+}
+
+function optionChainRowHtml(row, type) {
+  const tracked = optionsContractSet().has(row.contractSymbol);
+  const iv = row.impliedVolatility != null ? (row.impliedVolatility * 100).toFixed(1) + "%" : EMDASH;
+  const cell = (v, fmt) => v == null ? EMDASH : fmt(v);
+  return `<tr class="${row.inTheMoney ? "opt-itm" : ""}">
+    <td class="opt-strike">$${row.strike.toFixed(2)}</td>
+    <td>${cell(row.lastPrice, v => "$" + v.toFixed(2))}</td>
+    <td>${cell(row.bid, v => "$" + v.toFixed(2))}</td>
+    <td>${cell(row.ask, v => "$" + v.toFixed(2))}</td>
+    <td>${iv}</td>
+    <td>${cell(row.openInterest, v => v.toLocaleString())}</td>
+    <td>${cell(row.volume, v => v.toLocaleString())}</td>
+    <td><button type="button" class="fill-btn" data-add-contract="${row.contractSymbol}" data-type="${type}"
+      ${tracked ? "disabled" : ""}>${tracked ? "Added" : "+ Add"}</button></td>
+  </tr>`;
+}
+
+function renderOptionsChain() {
+  if (!optionsChain) return;
+  const emptyRow = (label) => `<tr><td colspan="8" style="color:var(--text-muted)">No ${label} for this expiration.</td></tr>`;
+  document.getElementById("optionsCallsBody").innerHTML =
+    optionsChain.calls.map(r => optionChainRowHtml(r, "call")).join("") || emptyRow("calls");
+  document.getElementById("optionsPutsBody").innerHTML =
+    optionsChain.puts.map(r => optionChainRowHtml(r, "put")).join("") || emptyRow("puts");
+  document.getElementById("optionsChainGrid").hidden = false;
+}
+
+async function saveOptionsWatchlist(contracts) {
+  const res = await fetch(BRIDGE + "/api/options-watchlist", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ contracts }),
+  });
+  const j = await res.json();
+  if (!res.ok || j.error) throw new Error(j.error || ("HTTP " + res.status));
+  optionsContracts = j.contracts || [];
+  renderOptionsChain();     // refresh "+ Add"/"Added" button state on visible rows
+  renderOptionsWatchlist();
+  refreshOptionsQuotes();
+}
+
+async function addOptionContract(contractSymbol, type) {
+  if (optionsContractSet().has(contractSymbol) || !optionsChain) return;
+  const row = optionsChain.calls.concat(optionsChain.puts).find(r => r.contractSymbol === contractSymbol);
+  if (!row) return;
+  const entry = { contractSymbol, ticker: optionsTicker, expiration: optionsExpiration, type, strike: row.strike };
+  try {
+    await saveOptionsWatchlist([...optionsContracts, entry]);
+    flashToast("Added " + contractSymbol + " to your options watchlist.");
+  } catch (e) {
+    flashToast("Couldn't add contract — " + String(e.message || e), true);
+  }
+}
+
+async function removeOptionContract(contractSymbol) {
+  try {
+    await saveOptionsWatchlist(optionsContracts.filter(c => c.contractSymbol !== contractSymbol));
+  } catch (e) {
+    flashToast("Couldn't remove contract — " + String(e.message || e), true);
+  }
+}
+
+function optionContractLabel(c) {
+  return `${c.ticker} $${c.strike.toFixed(2)} ${c.type === "call" ? "Call" : "Put"}`;
+}
+
+function renderOptionsWatchlist(prevQuoteMap = {}) {
+  const empty = document.getElementById("optionsWatchlistEmpty");
+  const wrap = document.getElementById("optionsWatchlistTableWrap");
+  if (!optionsContracts.length) {
+    empty.hidden = false;
+    wrap.hidden = true;
+    document.getElementById("optionsWatchlistBody").innerHTML = "";
+    return;
+  }
+  empty.hidden = true;
+  wrap.hidden = false;
+  document.getElementById("optionsWatchlistBody").innerHTML = optionsContracts.map(c => {
+    const label = optionContractLabel(c);
+    return `<tr data-contract="${c.contractSymbol}" style="cursor:pointer">
+      <td style="text-align:left;font-weight:650">${label}</td>
+      <td style="text-align:left">${c.expiration}</td>
+      <td>${watchlistChangeHtml(optionsQuoteMap[c.contractSymbol] || {}, prevQuoteMap[c.contractSymbol])}</td>
+      <td><button type="button" class="wl-remove" data-remove-contract="${c.contractSymbol}"
+        title="Remove" aria-label="Remove ${label}">×</button></td>
+    </tr>`;
+  }).join("");
+}
+
+async function loadOptionsWatchlist() {
+  try {
+    const res = await fetch(BRIDGE + "/api/options-watchlist");
+    const j = await res.json();
+    if (!res.ok) throw new Error(j.error || ("HTTP " + res.status));
+    optionsContracts = j.contracts || [];
+    renderOptionsWatchlist();
+    await refreshOptionsQuotes();
+  } catch { /* transient failure — leave whatever was last rendered */ }
+}
+
+async function refreshOptionsQuotes() {
+  if (!optionsContracts.length) return;
+  const symbols = optionsContracts.map(c => c.contractSymbol);
+  try {
+    const res = await fetch(BRIDGE + "/api/options/quote?contracts=" + encodeURIComponent(symbols.join(",")));
+    const j = await res.json();
+    if (!res.ok) throw new Error(j.error || ("HTTP " + res.status));
+    const prevQuoteMap = optionsQuoteMap;
+    optionsQuoteMap = {};
+    (j.quotes || []).forEach(q => { optionsQuoteMap[q.ticker] = q; });
+    renderOptionsWatchlist(prevQuoteMap);
+  } catch { /* transient failure — leave whatever was last rendered */ }
+}
+
+function stopOptionsLive() {
+  if (optionsTimer) { clearInterval(optionsTimer); optionsTimer = null; }
+}
+function startOptionsLive() {
+  stopOptionsLive();   // idempotent, same discipline as initWatchlist
+  loadOptionsWatchlist();
+  optionsTimer = setInterval(() => {
+    if (currentView !== "options" || document.visibilityState !== "visible") return;
+    refreshOptionsQuotes();
+  }, 45000);
+}
+
+document.getElementById("optionsSearchForm").addEventListener("submit", (ev) => {
+  ev.preventDefault();
+  searchOptions(document.getElementById("optionsSearchInput").value);
+});
+document.getElementById("optionsExpRow").addEventListener("click", (ev) => {
+  const btn = ev.target.closest("[data-exp]");
+  if (btn) selectOptionsExpiration(btn.dataset.exp);
+});
+document.getElementById("optionsChainGrid").addEventListener("click", (ev) => {
+  const btn = ev.target.closest("[data-add-contract]");
+  if (btn && !btn.disabled) addOptionContract(btn.dataset.addContract, btn.dataset.type);
+});
+document.getElementById("optionsWatchlistBody").addEventListener("click", (ev) => {
+  const removeBtn = ev.target.closest("[data-remove-contract]");
+  if (removeBtn) { removeOptionContract(removeBtn.dataset.removeContract); return; }
+  const row = ev.target.closest("tr[data-contract]");
+  if (row) openOptionsChart(row.dataset.contract);
+});
+
 let watchlistChartTicker = null;
 let watchlistChartRange = "3mo";
 let watchlistBenchmarkOn = false;
@@ -4001,13 +4316,22 @@ let watchlistSelStart = null;
 let watchlistSelEnd = null;
 let watchlistDragging = false;
 
+// "stock" charts any plain ticker via /api/watchlist/history (benchmark
+// overlay + company snapshot available); "option" charts one tracked
+// contract via /api/options/history (neither applies — hidden in that mode).
+// watchlistChartTicker doubles as "the symbol currently charted" in both
+// modes, so loadWatchlistChart() below stays a single shared function.
+let watchlistChartMode = "stock";
+
 function openWatchlistChart(ticker) {
+  watchlistChartMode = "stock";
   watchlistChartTicker = ticker;
   watchlistChartRange = "3mo";
   watchlistBenchmarkOn = false;
   document.getElementById("watchlistChartTitle").textContent = ticker;
   document.getElementById("watchlistChartMeta").innerHTML = watchlistChangeHtml(watchlistQuoteMap[ticker] || {});
   updateWatchlistRangeButtons();
+  document.querySelector(".watchlist-benchmark-row").hidden = false;
   const benchBtn = document.getElementById("watchlistBenchmarkToggle");
   benchBtn.classList.remove("is-active");
   benchBtn.setAttribute("aria-pressed", "false");
@@ -4031,6 +4355,29 @@ function openTickerLookup(raw) {
   openWatchlistChart(ticker);
 }
 
+// Opens the same chart modal for one tracked option contract instead of a
+// stock ticker — added to the watchlist happens from the chain table, not
+// from this modal, so the "+ Watchlist" button and the benchmark/snapshot
+// chrome (neither means anything for a single contract) stay hidden here.
+function openOptionsChart(contractSymbol) {
+  const c = optionsContracts.find(x => x.contractSymbol === contractSymbol);
+  watchlistChartMode = "option";
+  watchlistChartTicker = contractSymbol;
+  watchlistChartRange = "3mo";
+  watchlistBenchmarkOn = false;
+  document.getElementById("watchlistChartTitle").textContent =
+    c ? `${optionContractLabel(c)} · exp ${c.expiration}` : contractSymbol;
+  document.getElementById("watchlistChartMeta").innerHTML = watchlistChangeHtml(optionsQuoteMap[contractSymbol] || {});
+  updateWatchlistRangeButtons();
+  document.querySelector(".watchlist-benchmark-row").hidden = true;
+  const snapshotGrid = document.getElementById("watchlistSnapshotGrid");
+  snapshotGrid.hidden = true;
+  snapshotGrid.innerHTML = "";
+  document.getElementById("btnWatchlistModalAdd").hidden = true;
+  openModalEl(document.getElementById("watchlistChartModal"));
+  loadWatchlistChart();
+}
+
 function updateWatchlistRangeButtons() {
   document.querySelectorAll("#watchlistRangeRow [data-range]").forEach(b => {
     const active = b.dataset.range === watchlistChartRange;
@@ -4040,27 +4387,34 @@ function updateWatchlistRangeButtons() {
 }
 
 async function loadWatchlistChart() {
-  const ticker = watchlistChartTicker, range = watchlistChartRange, wantBenchmark = watchlistBenchmarkOn;
+  const mode = watchlistChartMode, symbol = watchlistChartTicker, range = watchlistChartRange;
+  const wantBenchmark = mode === "stock" && watchlistBenchmarkOn;
+  const isStale = () => mode !== watchlistChartMode || symbol !== watchlistChartTicker
+    || range !== watchlistChartRange || wantBenchmark !== (watchlistChartMode === "stock" && watchlistBenchmarkOn);
   const statusEl = document.getElementById("watchlistChartStatus");
   statusEl.textContent = "Loading price history…";
   statusEl.className = "watchlist-chart-status";
   renderWatchlistChart([], range, null);
   try {
-    let url = BRIDGE + "/api/watchlist/history?ticker=" + encodeURIComponent(ticker)
-      + "&range=" + encodeURIComponent(range);
+    let url = mode === "option"
+      ? BRIDGE + "/api/options/history?contract=" + encodeURIComponent(symbol) + "&range=" + encodeURIComponent(range)
+      : BRIDGE + "/api/watchlist/history?ticker=" + encodeURIComponent(symbol) + "&range=" + encodeURIComponent(range);
     if (wantBenchmark) url += "&benchmark=1";
     const res = await fetch(url);
     const j = await res.json();
     if (!res.ok || j.error) throw new Error(j.error || ("HTTP " + res.status));
-    // The user may have switched ticker/range/benchmark while this was in flight.
-    if (ticker !== watchlistChartTicker || range !== watchlistChartRange || wantBenchmark !== watchlistBenchmarkOn) return;
+    if (isStale()) return;   // the user switched symbol/range/benchmark while this was in flight
     const points = j.points || [];
     renderWatchlistChart(points, range, wantBenchmark ? (j.benchmarkPoints || null) : null);
     document.getElementById("watchlistChartMeta").innerHTML = watchlistRangeChangeHtml(points);
     statusEl.textContent = "";
   } catch (e) {
-    if (ticker !== watchlistChartTicker || range !== watchlistChartRange || wantBenchmark !== watchlistBenchmarkOn) return;
-    statusEl.textContent = "Couldn't load a chart — " + String(e.message || e);
+    if (isStale()) return;
+    // An option contract's history disappears once it expires — Yahoo drops
+    // the series entirely, so this is the expected error shape for it, not
+    // a bug; the extra hint only applies in that mode.
+    statusEl.textContent = "Couldn't load a chart — " + String(e.message || e)
+      + (mode === "option" ? " (this happens once a contract expires)" : "");
     statusEl.className = "watchlist-chart-status err";
   }
 }
@@ -6678,6 +7032,8 @@ const VIEWS = {
     swatch: "linear-gradient(145deg,#4fcf9f,#0d6b4c)", fg: "#04140e" },
   portfolio:  { mark: "PF", title: "Portfolio Tracker",   sub: "Track and aggregate your positions",
     swatch: "linear-gradient(145deg,#6fa8e5,#2c5cb5)", fg: "#f5f5f2" },
+  options:    { mark: "OP", title: "Options Watchlist",   sub: "Search chains, track contracts, chart performance",
+    swatch: "linear-gradient(145deg,#d98fe0,#8a3fa0)", fg: "#1c0d20" },
 };
 let currentView = "projection";
 
@@ -6689,6 +7045,7 @@ function setView(v) {
   document.getElementById("viewCalculator").hidden = v !== "calculator";
   document.getElementById("viewNetWorth").hidden = v !== "networth";
   document.getElementById("viewPortfolio").hidden = v !== "portfolio";
+  document.getElementById("viewOptions").hidden = v !== "options";
   document.querySelectorAll("[data-view-only]").forEach(node => {
     node.hidden = node.dataset.viewOnly !== v;
   });
@@ -6718,6 +7075,8 @@ function setView(v) {
     // fetch now rather than leaving the KPIs blind for up to HOME_POLL_MS.
     if (bridgeUp) refreshHomeQuotes();
   } else stopHomeLive();
+  // Same idea for the options-watchlist poll — only while that view is on screen.
+  if (v === "options") { renderOptionsWatchlist(); startOptionsLive(); } else stopOptionsLive();
 }
 
 function closeProductMenu() {

@@ -237,6 +237,17 @@ def pg_init():
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
                 )
             """)
+            # Same single-row shape as portfolio — one shared list of tracked
+            # option contracts, stored as a JSON array of contract objects
+            # (not bare symbol strings, since strike/expiration/type are
+            # display data the client would otherwise have to re-derive).
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS options_watchlist (
+                    id         TEXT PRIMARY KEY DEFAULT 'default',
+                    contracts  TEXT NOT NULL,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+            """)
             conn.commit()
         _pg_error = None
         return True, None
@@ -407,6 +418,12 @@ WATCHLIST_FILE = os.path.join(HERE, "watchlist.json")
 WATCHLIST_MAX = 12
 TICKER_RE = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
 CURRENCY_RE = re.compile(r"^[A-Z]{3}$")
+# OCC option symbol: 1-6 letter root, YYMMDD expiry, C/P, 8-digit strike
+# (strike * 1000, zero-padded) — e.g. "AAPL260116C00230000". Deliberately a
+# separate pattern from TICKER_RE rather than a looser version of it, so
+# stock-ticker validation elsewhere is never accidentally widened.
+CONTRACT_RE = re.compile(r"^[A-Z]{1,6}\d{6}[CP]\d{8}$")
+EXPIRATION_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def get_fx_rates(to_ccy, currencies):
@@ -481,6 +498,97 @@ def set_watchlist(tickers):
         return True, clean
     except OSError as exc:
         return False, f"Could not write watchlist file: {exc}"
+
+
+# ── Options watchlist: specific contracts, not just tickers ─────────────────
+# Same file/Postgres split, but each entry is a small object (strike/expiry/
+# type are display data the client would otherwise have to re-derive from
+# the contract symbol), so this follows the portfolio-positions shape
+# (get_portfolio/set_portfolio above) rather than the plain ticker-list one.
+OPTIONS_WATCHLIST_FILE = os.path.join(HERE, "options_watchlist.json")
+OPTIONS_WATCHLIST_MAX = 12
+CONTRACT_TYPES = {"call", "put"}
+
+
+def _clean_option_contract(raw):
+    """Validates one contract entry from the client payload; returns a clean
+    dict, or None to drop it rather than fail the whole request."""
+    if not isinstance(raw, dict):
+        return None
+    symbol = str(raw.get("contractSymbol") or "").strip().upper()
+    ticker = str(raw.get("ticker") or "").strip().upper()
+    expiration = str(raw.get("expiration") or "").strip()
+    opt_type = str(raw.get("type") or "").strip().lower()
+    if not (CONTRACT_RE.match(symbol) and TICKER_RE.match(ticker)
+            and EXPIRATION_RE.match(expiration) and opt_type in CONTRACT_TYPES):
+        return None
+    try:
+        strike = float(raw.get("strike"))
+    except (TypeError, ValueError):
+        return None
+    return {"contractSymbol": symbol, "ticker": ticker, "expiration": expiration,
+            "type": opt_type, "strike": strike}
+
+
+def get_options_watchlist():
+    """Returns (contracts, updated_at_ms) — the shared tracked-contracts
+    list and when it was last saved."""
+    if USE_PG:
+        try:
+            with _pg_connect() as conn, conn.cursor() as cur:
+                cur.execute("SELECT contracts, updated_at FROM options_watchlist WHERE id = 'default'")
+                row = cur.fetchone()
+            if not row:
+                return [], 0
+            data = json.loads(row[0])
+            updated_at_ms = int(row[1].timestamp() * 1000) if row[1] else 0
+            return (data if isinstance(data, list) else []), updated_at_ms
+        except Exception as exc:                                  # noqa: BLE001
+            print(f"[bridge] Postgres read (options_watchlist) failed: {exc}", flush=True)
+            return [], 0
+
+    try:
+        with open(OPTIONS_WATCHLIST_FILE, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        if isinstance(data, dict) and isinstance(data.get("contracts"), list):
+            return data["contracts"], int(data.get("updatedAt") or 0)
+    except (OSError, json.JSONDecodeError):
+        pass
+    return [], 0
+
+
+def set_options_watchlist(contracts):
+    """Validates, dedupes (by contractSymbol), and caps the list, then saves
+    it. Returns (ok, contracts_or_error)."""
+    clean = []
+    seen = set()
+    for raw in (contracts if isinstance(contracts, list) else []):
+        c = _clean_option_contract(raw)
+        if c and c["contractSymbol"] not in seen:
+            seen.add(c["contractSymbol"])
+            clean.append(c)
+    clean = clean[:OPTIONS_WATCHLIST_MAX]
+
+    if USE_PG:
+        try:
+            with _pg_connect() as conn, conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO options_watchlist (id, contracts, updated_at)
+                    VALUES ('default', %s, now())
+                    ON CONFLICT (id) DO UPDATE
+                        SET contracts = EXCLUDED.contracts, updated_at = now()
+                """, (json.dumps(clean),))
+                conn.commit()
+            return True, clean
+        except Exception as exc:                                  # noqa: BLE001
+            return False, f"Could not save to database: {exc}"
+
+    try:
+        with open(OPTIONS_WATCHLIST_FILE, "w", encoding="utf-8") as fh:
+            json.dump({"contracts": clean, "updatedAt": int(time.time() * 1000)}, fh, indent=2)
+        return True, clean
+    except OSError as exc:
+        return False, f"Could not write options watchlist file: {exc}"
 
 
 PORTFOLIO_FILE = os.path.join(HERE, "portfolio.json")
@@ -1198,6 +1306,67 @@ class Handler(BaseHTTPRequestHandler):
             self._json(snap, 502 if snap.get("error") else 200)
             return
 
+        if path == "/api/options/expirations":
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            ticker = (qs.get("ticker") or [""])[0].strip().upper()
+            if not TICKER_RE.match(ticker):
+                self._json({"error": "Invalid ticker."}, 400)
+                return
+            expirations, err = quotes_service.fetch_option_expirations(ticker)
+            if err:
+                self._json({"ticker": ticker, "expirations": [], "error": err}, 502)
+                return
+            self._json({"ticker": ticker, "expirations": expirations, "error": None})
+            return
+
+        if path == "/api/options/chain":
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            ticker = (qs.get("ticker") or [""])[0].strip().upper()
+            expiration = (qs.get("expiration") or [""])[0].strip()
+            if not TICKER_RE.match(ticker):
+                self._json({"error": "Invalid ticker."}, 400)
+                return
+            if not EXPIRATION_RE.match(expiration):
+                self._json({"error": "Invalid expiration."}, 400)
+                return
+            chain, err = quotes_service.fetch_option_chain(ticker, expiration)
+            if err:
+                self._json({"ticker": ticker, "expiration": expiration, "calls": [], "puts": [], "error": err}, 502)
+                return
+            self._json({"ticker": ticker, "expiration": expiration,
+                        "calls": chain["calls"], "puts": chain["puts"], "error": None})
+            return
+
+        if path == "/api/options/history":
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            contract = (qs.get("contract") or [""])[0].strip().upper()
+            range_key = (qs.get("range") or ["3mo"])[0].strip().lower()
+            if not CONTRACT_RE.match(contract):
+                self._json({"error": "Invalid contract symbol."}, 400)
+                return
+            if range_key not in quotes_service.HISTORY_RANGES:
+                self._json({"error": "Invalid range."}, 400)
+                return
+            points, err = quotes_service.fetch_history(contract, range_key)
+            if err:
+                self._json({"contract": contract, "points": [], "error": err}, 502)
+                return
+            self._json({"contract": contract, "points": points, "error": None})
+            return
+
+        if path == "/api/options/quote":
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            raw = (qs.get("contracts") or [""])[0]
+            contracts = [c.strip().upper() for c in raw.split(",") if c.strip()]
+            contracts = [c for c in contracts if CONTRACT_RE.match(c)]
+            self._json({"contracts": contracts, "quotes": quotes_service.fetch_option_quotes(contracts)})
+            return
+
+        if path == "/api/options-watchlist":
+            contracts, updated_at_ms = get_options_watchlist()
+            self._json({"contracts": contracts, "updatedAt": updated_at_ms})
+            return
+
         if path == "/api/notion/databases":
             if not NOTION_TOKEN:
                 self._json({"error": "Notion isn't configured on the server yet."}, 400)
@@ -1311,6 +1480,20 @@ class Handler(BaseHTTPRequestHandler):
                 return
             _, updated_at_ms = get_portfolio()
             self._json({"positions": result, "updatedAt": updated_at_ms})
+            return
+
+        if path == "/api/options-watchlist":
+            payload = self._read_json_body()
+            raw = payload.get("contracts")
+            if not isinstance(raw, list):
+                self._json({"error": "contracts must be a list."}, 400)
+                return
+            ok, result = set_options_watchlist(raw)
+            if not ok:
+                self._json({"error": result}, 500)
+                return
+            _, updated_at_ms = get_options_watchlist()
+            self._json({"contracts": result, "updatedAt": updated_at_ms})
             return
 
         if path == "/api/notion/settings":

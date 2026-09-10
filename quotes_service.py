@@ -201,3 +201,156 @@ def fetch_snapshot(ticker):
 
     _SNAPSHOT_CACHE[ticker] = (now, snap)
     return snap
+
+
+# ── Options: expirations, chain, and per-contract quotes/history ───────────
+# fetch_history() above already works unchanged for an option contract
+# symbol — Yahoo's chart endpoint is symbol-agnostic, it just happens to
+# also carry real historical bars for currently-active option contracts.
+# That's the one piece of this section that needed no new code at all.
+
+_OPTION_EXP_CACHE = {}        # ticker -> (fetched_at, (expirations, error))
+_OPTION_EXP_CACHE_TTL = 300   # seconds — expiration dates don't change intraday
+
+_OPTION_CHAIN_CACHE = {}      # (ticker, expiration) -> (fetched_at, (chain, error))
+_OPTION_CHAIN_CACHE_TTL = 600   # seconds — longer than _CACHE_TTL: options
+                                 # endpoints are more prone to Yahoo rate-limiting
+                                 # than the plain quote endpoint, and an expiration's
+                                 # chain doesn't need second-by-second freshness.
+
+
+def fetch_option_expirations(ticker):
+    """Returns (expirations, error) — expirations is a list of "YYYY-MM-DD"
+    strings, nearest first, or None on error."""
+    now = time.time()
+    cached = _OPTION_EXP_CACHE.get(ticker)
+    if cached and now - cached[0] <= _OPTION_EXP_CACHE_TTL:
+        return cached[1]
+
+    try:
+        import yfinance as yf
+    except ImportError:
+        result = (None, "yfinance isn't installed on the server")
+        _OPTION_EXP_CACHE[ticker] = (now, result)
+        return result
+
+    try:
+        expirations = list(yf.Ticker(ticker).options)
+    except Exception as exc:                                          # noqa: BLE001
+        result = (None, str(exc) or "Couldn't reach the options server.")
+        _OPTION_EXP_CACHE[ticker] = (now, result)
+        return result
+
+    result = (expirations, None) if expirations else (None, "No options found for this ticker.")
+    _OPTION_EXP_CACHE[ticker] = (now, result)
+    return result
+
+
+# Columns pulled from yfinance's option_chain() calls/puts DataFrames.
+_CHAIN_NUMERIC_FIELDS = ("strike", "lastPrice", "bid", "ask", "impliedVolatility", "openInterest", "volume")
+
+
+def _chain_rows(df):
+    rows = []
+    for _, row in df.iterrows():
+        rec = {f: _safe_num(row.get(f)) for f in _CHAIN_NUMERIC_FIELDS}
+        rec["contractSymbol"] = str(row.get("contractSymbol") or "")
+        rec["inTheMoney"] = bool(row.get("inTheMoney"))
+        rows.append(rec)
+    return rows
+
+
+def fetch_option_chain(ticker, expiration):
+    """Returns ({"calls": [...], "puts": [...]}, error) for one expiration.
+    Each row has contractSymbol/strike/lastPrice/bid/ask/impliedVolatility/
+    openInterest/volume/inTheMoney — NaN-valued numeric fields come back as
+    None (same reasoning as fetch_history's NaN guard above: a bare NaN
+    breaks JSON.parse() on the frontend)."""
+    key = (ticker, expiration)
+    now = time.time()
+    cached = _OPTION_CHAIN_CACHE.get(key)
+    if cached and now - cached[0] <= _OPTION_CHAIN_CACHE_TTL:
+        return cached[1]
+
+    try:
+        import yfinance as yf
+    except ImportError:
+        result = (None, "yfinance isn't installed on the server")
+        _OPTION_CHAIN_CACHE[key] = (now, result)
+        return result
+
+    try:
+        chain = yf.Ticker(ticker).option_chain(expiration)
+    except Exception as exc:                                          # noqa: BLE001
+        result = (None, str(exc) or "Couldn't reach the options server.")
+        _OPTION_CHAIN_CACHE[key] = (now, result)
+        return result
+
+    calls, puts = _chain_rows(chain.calls), _chain_rows(chain.puts)
+    result = ({"calls": calls, "puts": puts}, None) if (calls or puts) \
+        else (None, "No options found for this expiration.")
+    _OPTION_CHAIN_CACHE[key] = (now, result)
+    return result
+
+
+_OPTION_QUOTE_CACHE = {}   # contractSymbol -> (fetched_at, quote_dict) — kept
+                            # separate from stock _CACHE so the two ticker
+                            # spaces (plain tickers vs. OCC contract symbols)
+                            # never share a slot.
+
+
+def fetch_option_quotes(contracts):
+    """Same shape/contract as fetch_quotes(): one {"ticker","price","change",
+    "changePct","error"} dict per input contract symbol, same order, briefly
+    cached. Whether fast_info behaves for an OCC option symbol the way it
+    does for a stock ticker is undocumented on Yahoo's side, so this tries
+    fast_info first and falls back to deriving price/previous-close from the
+    last two daily bars of fetch_history() — the one path already confirmed
+    to return real data for an active contract — if fast_info comes back
+    empty or raises."""
+    if not contracts:
+        return []
+
+    now = time.time()
+    stale = [c for c in contracts if c not in _OPTION_QUOTE_CACHE or now - _OPTION_QUOTE_CACHE[c][0] > _CACHE_TTL]
+    if stale:
+        try:
+            import yfinance as yf
+        except ImportError:
+            for c in stale:
+                _OPTION_QUOTE_CACHE[c] = (now, _error(c, "yfinance isn't installed on the server"))
+        else:
+            pool = concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(stale)))
+            futures = {pool.submit(_fetch_one_option, yf, c): c for c in stale}
+            for fut, c in futures.items():
+                try:
+                    _OPTION_QUOTE_CACHE[c] = (now, fut.result(timeout=_FETCH_TIMEOUT))
+                except concurrent.futures.TimeoutError:
+                    _OPTION_QUOTE_CACHE[c] = (now, _error(c, "Quote request timed out."))
+            pool.shutdown(wait=False)
+
+    return [_OPTION_QUOTE_CACHE[c][1] for c in contracts]
+
+
+def _fetch_one_option(yf_mod, symbol):
+    pair = None
+    try:
+        fi = yf_mod.Ticker(symbol).fast_info
+        price, prev = fi.last_price, fi.previous_close
+        if price is not None and prev is not None and math.isfinite(price) and math.isfinite(prev):
+            pair = (price, prev)
+    except Exception:                                                  # noqa: BLE001
+        pass
+
+    if pair is None:
+        points, _err = fetch_history(symbol, "5d")
+        if points:
+            pair = (points[-1]["close"], points[-2]["close"] if len(points) > 1 else points[-1]["close"])
+
+    if pair is None:
+        return _error(symbol, "No quote found for this contract.")
+    price, prev = pair
+    change = price - prev
+    change_pct = (change / prev * 100) if prev else 0.0
+    return {"ticker": symbol, "price": round(price, 2), "change": round(change, 2),
+            "changePct": round(change_pct, 2), "error": None}
