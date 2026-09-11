@@ -777,6 +777,8 @@ textarea.notion-notes:not([disabled]):placeholder-shown { background: var(--gold
   #chart { min-width: 660px; }
 }
 #chart:focus-visible { outline: 2px solid var(--gold-dim); outline-offset: 3px; border-radius: 8px; }
+#peChart { display: block; width: 100%; height: auto; }
+@media (max-width: 760px) { #peChart { min-width: 500px; } }
 .chart-legend {
   display: flex; gap: 18px; flex-wrap: wrap;
   padding: 0 18px 14px;
@@ -1646,6 +1648,21 @@ footer.legal code {
     </div>
   </div>
 
+  <!-- ── Trailing P/E History ───────────────────────────────────────────── -->
+  <div class="section-head">
+    <h2>Trailing P/E History</h2>
+    <span class="hint">Price ÷ trailing 12-month EPS, reconstructed from quarterly earnings — an approximation, not the exact historical ratio</span>
+    <span class="rule"></span>
+  </div>
+  <div class="card">
+    <div class="chart-wrap">
+      <svg id="peChart" viewBox="0 0 920 170" role="img" aria-labelledby="peChartTitle">
+        <title id="peChartTitle">Trailing P/E history</title>
+      </svg>
+    </div>
+    <div class="watchlist-chart-status" id="peChartStatus"></div>
+  </div>
+
   <div class="card">
     <div class="chart-wrap">
       <svg id="chart" viewBox="0 0 920 340" role="img" aria-labelledby="chartTitle chartDesc" tabindex="0">
@@ -2491,6 +2508,92 @@ function renderUpside() {
     </div>`;
 }
 
+/* ── Trailing P/E history — price ÷ reconstructed trailing EPS, an
+   approximation (see quotes_service.fetch_trailing_pe_history's docstring
+   for why "historical forward P/E" isn't obtainable anywhere for free).
+   Fetched fresh for company.ticker, never persisted with the projection —
+   same treatment as liveQuote. */
+let peHistory = null;   // [{date, pe}] | null
+
+function clearPeChart() {
+  peHistory = null;
+  const svg = document.getElementById("peChart");
+  if (svg) [...svg.childNodes].forEach(n => { if (!["title", "desc"].includes(n.nodeName)) n.remove(); });
+  const statusEl = document.getElementById("peChartStatus");
+  if (statusEl) { statusEl.textContent = ""; statusEl.className = "watchlist-chart-status"; }
+}
+
+async function fetchProjectionPeHistory() {
+  const ticker = (company.ticker || "").trim().toUpperCase();
+  const statusEl = document.getElementById("peChartStatus");
+  if (!bridgeUp || !ticker) { clearPeChart(); return; }
+  if (statusEl) { statusEl.textContent = "Loading trailing P/E history…"; statusEl.className = "watchlist-chart-status"; }
+  try {
+    const res = await fetch(BRIDGE + "/api/watchlist/pe-history?ticker=" + encodeURIComponent(ticker) + "&range=1y");
+    const j = await res.json();
+    if (!res.ok || j.error) throw new Error(j.error || ("HTTP " + res.status));
+    if (ticker !== (company.ticker || "").trim().toUpperCase()) return;   // superseded by a newer ticker
+    peHistory = j.points || [];
+    renderPeChart(peHistory);
+    if (statusEl) { statusEl.textContent = ""; statusEl.className = "watchlist-chart-status"; }
+  } catch (e) {
+    if (ticker !== (company.ticker || "").trim().toUpperCase()) return;
+    peHistory = null;
+    const svg = document.getElementById("peChart");
+    if (svg) [...svg.childNodes].forEach(n => { if (!["title", "desc"].includes(n.nodeName)) n.remove(); });
+    if (statusEl) {
+      statusEl.textContent = "Couldn't load trailing P/E — " + String(e.message || e);
+      statusEl.className = "watchlist-chart-status err";
+    }
+  }
+}
+
+function renderPeChart(points) {
+  const svg = document.getElementById("peChart");
+  if (!svg) return;
+  [...svg.childNodes].forEach(n => { if (!["title", "desc"].includes(n.nodeName)) n.remove(); });
+  if (!points || !points.length) return;   // caller already set the status message
+
+  const VBw = 920, VBh = 170, padL = 50, padR = 14, padT = 14, padB = 24;
+  const plotW = VBw - padL - padR, plotH = VBh - padT - padB;
+  const vals = points.map(p => p.pe);
+  const ticks = niceTicks(Math.min(...vals), Math.max(...vals), 4);
+  const yMin = ticks[0], yMax = ticks[ticks.length - 1];
+  const X = (i) => padL + (plotW * i) / (points.length - 1 || 1);
+  const Y = (v) => padT + plotH - ((v - yMin) / (yMax - yMin || 1)) * plotH;
+
+  const gGrid = el("g");
+  ticks.forEach(tv => {
+    const y = Y(tv);
+    gGrid.append(el("line", { x1: padL, y1: y, x2: padL + plotW, y2: y,
+      stroke: "#2c2c2a", "stroke-width": "1", "shape-rendering": "crispEdges" }));
+    const lab = el("text", { x: padL - 8, y: y + 4, "text-anchor": "end",
+      fill: "#78776f", "font-size": "11", "font-family": "inherit", "font-variant-numeric": "tabular-nums" });
+    lab.textContent = tv.toFixed(1) + "x";
+    gGrid.append(lab);
+  });
+  svg.append(gGrid);
+
+  [0, Math.floor((points.length - 1) / 2), points.length - 1].forEach((i, k) => {
+    const anchor = k === 0 ? "start" : k === 2 ? "end" : "middle";
+    const t = el("text", { x: X(i), y: VBh - 6, "text-anchor": anchor,
+      fill: "#78776f", "font-size": "11", "font-family": "inherit" });
+    t.textContent = points[i].date;
+    svg.append(t);
+  });
+
+  const color = vals[vals.length - 1] >= vals[0] ? "#35c294" : "#ff8f8f";
+  const d = vals.map((v, i) => `${i ? "L" : "M"}${X(i).toFixed(2)},${Y(v).toFixed(2)}`).join(" ");
+  svg.append(el("path", { d, fill: "none", stroke: color, "stroke-width": "2",
+    "stroke-linejoin": "round", "stroke-linecap": "round" }));
+  svg.append(el("circle", { cx: X(vals.length - 1), cy: Y(vals[vals.length - 1]), r: "3.5", fill: color }));
+
+  const lastLabel = el("text", { x: X(vals.length - 1) - 8, y: Y(vals[vals.length - 1]) - 8, "text-anchor": "end",
+    fill: color, "font-size": "12.5", "font-weight": "700", "font-family": "inherit" });
+  lastLabel.textContent = vals[vals.length - 1].toFixed(1) + "x";
+  svg.append(lastLabel);
+}
+
 let lastMarginPct = null;
 function updateDerivedKPI() {
   const margin = safeDiv(company.netIncome, company.revenue);
@@ -2743,6 +2846,7 @@ function loadProjectById(id) {
   renderNotionUI();
   persist();
   fetchProjectionQuote();
+  fetchProjectionPeHistory();
   return true;
 }
 
@@ -2772,6 +2876,7 @@ function startNewProject() {
   assumptions.bull = mkAssumptions(0.18, 20, 28);
   zones = { buy: { low: 0, high: 0 }, sell: { low: 0, high: 0 } };
   liveQuote = null;
+  clearPeChart();
   locked = false;
   nw = { ...NW_DEFAULTS };
   nwLog = [];
@@ -5722,6 +5827,7 @@ document.getElementById("ticker").addEventListener("change", (e) => {
   company.ticker = e.target.value.trim().toUpperCase();
   persist();
   fetchProjectionQuote();
+  fetchProjectionPeHistory();
 });
 window.addEventListener("resize", () => { if (hoverIdx !== null) hideTooltip(); });
 
@@ -7279,6 +7385,7 @@ if (!bootedFromProject) {
   if (up) await syncFromBridge();   // pick up anything saved on another machine
   initWatchlist(up);
   fetchProjectionQuote();   // Home painted before this resolved — get the live price now
+  fetchProjectionPeHistory();
 
   // Portfolio has no natural per-position id to diff like projects do, so
   // this is a whole-list "newer wins" merge rather than a per-record one:

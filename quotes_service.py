@@ -2,6 +2,7 @@
 dependency — if yfinance isn't installed, every quote comes back tagged
 with an error instead of crashing the bridge."""
 import concurrent.futures
+import datetime
 import math
 import time
 
@@ -201,6 +202,98 @@ def fetch_snapshot(ticker):
 
     _SNAPSHOT_CACHE[ticker] = (now, snap)
     return snap
+
+
+# ── Trailing P/E history ─────────────────────────────────────────────────
+# Yahoo (and yfinance) only exposes a CURRENT forwardPE/trailingPE snapshot
+# (fetch_snapshot above) — there is no historical forward-P/E series
+# anywhere for free, since that would require past analyst EPS estimates
+# as-of past dates, which is a paid institutional data product. A
+# historical TRAILING P/E is reconstructable instead: real daily price
+# history (fetch_history above) divided by trailing-twelve-month EPS,
+# rebuilt from quarterly net income. This is an approximation — TTM EPS is
+# divided by the CURRENT share count (yfinance doesn't reliably expose
+# historical share counts), so buybacks/dilution aren't reflected
+# point-in-time, and the line steps at each quarterly report rather than
+# moving daily.
+_PE_HISTORY_CACHE = {}        # (ticker, range_key) -> (fetched_at, (points, error))
+_PE_HISTORY_CACHE_TTL = 3600  # seconds — quarterly earnings change far slower than price
+
+
+def fetch_trailing_pe_history(ticker, range_key="1y"):
+    """Returns (points, error) — points is [{"date", "pe"}], oldest first,
+    same date format as fetch_history(). None/empty on error."""
+    key = (ticker, range_key)
+    now = time.time()
+    cached = _PE_HISTORY_CACHE.get(key)
+    if cached and now - cached[0] <= _PE_HISTORY_CACHE_TTL:
+        return cached[1]
+
+    price_points, err = fetch_history(ticker, range_key)
+    if err:
+        result = (None, err)
+        _PE_HISTORY_CACHE[key] = (now, result)
+        return result
+
+    try:
+        import yfinance as yf
+    except ImportError:
+        result = (None, "yfinance isn't installed on the server")
+        _PE_HISTORY_CACHE[key] = (now, result)
+        return result
+
+    try:
+        t = yf.Ticker(ticker)
+        qis = t.quarterly_income_stmt
+        shares = t.fast_info.shares_outstanding
+    except Exception as exc:                                          # noqa: BLE001
+        result = (None, str(exc) or "Couldn't reach the earnings data.")
+        _PE_HISTORY_CACHE[key] = (now, result)
+        return result
+
+    if qis is None or qis.empty or "Net Income" not in qis.index or not shares:
+        result = (None, "No earnings data found for this ticker.")
+        _PE_HISTORY_CACHE[key] = (now, result)
+        return result
+
+    # quarterly_income_stmt columns are quarter-end dates, newest first —
+    # sort oldest-first so the trailing-window walk below reads naturally.
+    ni_row = qis.loc["Net Income"].dropna().sort_index()
+    quarters = list(ni_row.items())   # [(Timestamp, net_income), ...] oldest first
+
+    # TTM EPS as of each quarter-end: sum of that quarter and up to 3 prior
+    # ones (fewer than 4 available near the start of the series still
+    # produces a real, just partial-year, trailing figure).
+    ttm_series = []
+    for i in range(len(quarters)):
+        window = quarters[max(0, i - 3):i + 1]
+        if len(window) < 2:   # one quarter alone is too noisy to call "trailing"
+            continue
+        ttm_ni = sum(v for _, v in window)
+        ttm_series.append((quarters[i][0].date(), ttm_ni / shares))
+
+    if not ttm_series:
+        result = (None, "Not enough quarterly earnings data to compute trailing EPS.")
+        _PE_HISTORY_CACHE[key] = (now, result)
+        return result
+
+    # Walk the price series and attach the most recently known TTM EPS as of
+    # each date (a step function — EPS only updates on quarterly report dates).
+    points = []
+    ttm_idx = 0
+    for p in price_points:
+        d = datetime.date.fromisoformat(p["date"][:10])
+        while ttm_idx + 1 < len(ttm_series) and ttm_series[ttm_idx + 1][0] <= d:
+            ttm_idx += 1
+        if ttm_series[ttm_idx][0] > d:
+            continue   # no earnings known yet this far back
+        eps = ttm_series[ttm_idx][1]
+        if eps and eps > 0:
+            points.append({"date": p["date"], "pe": round(p["close"] / eps, 2)})
+
+    result = (points, None) if points else (None, "Not enough overlapping price/earnings history to compute P/E.")
+    _PE_HISTORY_CACHE[key] = (now, result)
+    return result
 
 
 # ── Options: expirations, chain, and per-contract quotes/history ───────────
