@@ -777,7 +777,7 @@ textarea.notion-notes:not([disabled]):placeholder-shown { background: var(--gold
   #chart { min-width: 660px; }
 }
 #chart:focus-visible { outline: 2px solid var(--gold-dim); outline-offset: 3px; border-radius: 8px; }
-#peChart { display: block; width: 100%; height: auto; }
+#peChart, #watchlistPeChart { display: block; width: 100%; height: auto; }
 @media (max-width: 760px) { #peChart { min-width: 500px; } }
 .chart-legend {
   display: flex; gap: 18px; flex-wrap: wrap;
@@ -1653,6 +1653,7 @@ footer.legal code {
     <h2>Trailing P/E History</h2>
     <span class="hint">Price ÷ trailing 12-month EPS, reconstructed from quarterly earnings — an approximation, not the exact historical ratio</span>
     <span class="rule"></span>
+    <button type="button" id="btnPeAverage" class="lock-btn" aria-pressed="false" title="Show the average P/E over this chart's time frame">Show average</button>
   </div>
   <div class="card">
     <div class="chart-wrap">
@@ -2194,6 +2195,21 @@ footer.legal code {
       </div>
       <div class="chart-legend" id="watchlistChartLegend" hidden></div>
       <div class="watchlist-chart-status" id="watchlistChartStatus"></div>
+
+      <div id="watchlistPeSection" hidden>
+        <div class="section-head" style="margin:16px 0 0">
+          <h3 style="margin:0;font-size:13px;letter-spacing:.03em;text-transform:uppercase;color:var(--text-muted)">Trailing P/E</h3>
+          <span class="hint">Approximate — price ÷ trailing EPS, same time frame as above</span>
+          <span class="rule"></span>
+          <button type="button" id="btnWatchlistPeAverage" class="lock-btn" aria-pressed="false" title="Show the average P/E over this time frame">Show average</button>
+        </div>
+        <div class="chart-wrap">
+          <svg id="watchlistPeChart" viewBox="0 0 640 130" role="img" aria-labelledby="watchlistPeChartTitle">
+            <title id="watchlistPeChartTitle">Trailing P/E history</title>
+          </svg>
+        </div>
+        <div class="watchlist-chart-status" id="watchlistPeStatus"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -2511,14 +2527,24 @@ function renderUpside() {
 /* ── Trailing P/E history — price ÷ reconstructed trailing EPS, an
    approximation (see quotes_service.fetch_trailing_pe_history's docstring
    for why "historical forward P/E" isn't obtainable anywhere for free).
-   Fetched fresh for company.ticker, never persisted with the projection —
-   same treatment as liveQuote. */
-let peHistory = null;   // [{date, pe}] | null
+   Two independent call sites share this rendering code: the Projection
+   view's own card (tracks company.ticker, fixed 1y window) and the
+   ticker-search/watchlist chart modal (tracks whatever symbol/range is
+   currently open there). Neither is ever persisted — both are fetched
+   fresh, same treatment as liveQuote. */
+let peHistory = null;             // [{date, pe}] | null — Projection view card
+let peShowAverage = false;
+let watchlistPeHistory = null;    // [{date, pe}] | null — ticker-search modal
+let watchlistPeShowAverage = false;
+
+function clearPeSvg(svgId) {
+  const svg = document.getElementById(svgId);
+  if (svg) [...svg.childNodes].forEach(n => { if (!["title", "desc"].includes(n.nodeName)) n.remove(); });
+}
 
 function clearPeChart() {
   peHistory = null;
-  const svg = document.getElementById("peChart");
-  if (svg) [...svg.childNodes].forEach(n => { if (!["title", "desc"].includes(n.nodeName)) n.remove(); });
+  clearPeSvg("peChart");
   const statusEl = document.getElementById("peChartStatus");
   if (statusEl) { statusEl.textContent = ""; statusEl.className = "watchlist-chart-status"; }
 }
@@ -2534,13 +2560,12 @@ async function fetchProjectionPeHistory() {
     if (!res.ok || j.error) throw new Error(j.error || ("HTTP " + res.status));
     if (ticker !== (company.ticker || "").trim().toUpperCase()) return;   // superseded by a newer ticker
     peHistory = j.points || [];
-    renderPeChart(peHistory);
+    renderPeChart("peChart", peHistory, peShowAverage);
     if (statusEl) { statusEl.textContent = ""; statusEl.className = "watchlist-chart-status"; }
   } catch (e) {
     if (ticker !== (company.ticker || "").trim().toUpperCase()) return;
     peHistory = null;
-    const svg = document.getElementById("peChart");
-    if (svg) [...svg.childNodes].forEach(n => { if (!["title", "desc"].includes(n.nodeName)) n.remove(); });
+    clearPeSvg("peChart");
     if (statusEl) {
       statusEl.textContent = "Couldn't load trailing P/E — " + String(e.message || e);
       statusEl.className = "watchlist-chart-status err";
@@ -2548,16 +2573,66 @@ async function fetchProjectionPeHistory() {
   }
 }
 
-function renderPeChart(points) {
-  const svg = document.getElementById("peChart");
+function togglePeAverage() {
+  peShowAverage = !peShowAverage;
+  document.getElementById("btnPeAverage").setAttribute("aria-pressed", String(peShowAverage));
+  renderPeChart("peChart", peHistory, peShowAverage);
+}
+
+// Ticker-search / watchlist chart modal's own P/E section — stock mode
+// only (P/E doesn't apply to an option contract), same symbol/range as
+// whatever the price chart above it is currently showing.
+function clearWatchlistPeChart() {
+  watchlistPeHistory = null;
+  clearPeSvg("watchlistPeChart");
+  const statusEl = document.getElementById("watchlistPeStatus");
+  if (statusEl) { statusEl.textContent = ""; statusEl.className = "watchlist-chart-status"; }
+}
+
+async function loadWatchlistPeHistory() {
+  const symbol = watchlistChartTicker, range = watchlistChartRange, mode = watchlistChartMode;
+  if (mode !== "stock" || !symbol) { clearWatchlistPeChart(); return; }
+  const statusEl = document.getElementById("watchlistPeStatus");
+  if (statusEl) { statusEl.textContent = "Loading trailing P/E…"; statusEl.className = "watchlist-chart-status"; }
+  try {
+    const res = await fetch(BRIDGE + "/api/watchlist/pe-history?ticker=" + encodeURIComponent(symbol)
+      + "&range=" + encodeURIComponent(range));
+    const j = await res.json();
+    if (!res.ok || j.error) throw new Error(j.error || ("HTTP " + res.status));
+    if (symbol !== watchlistChartTicker || range !== watchlistChartRange || mode !== watchlistChartMode) return;
+    watchlistPeHistory = j.points || [];
+    renderPeChart("watchlistPeChart", watchlistPeHistory, watchlistPeShowAverage);
+    if (statusEl) { statusEl.textContent = ""; statusEl.className = "watchlist-chart-status"; }
+  } catch (e) {
+    if (symbol !== watchlistChartTicker || range !== watchlistChartRange || mode !== watchlistChartMode) return;
+    watchlistPeHistory = null;
+    clearPeSvg("watchlistPeChart");
+    if (statusEl) {
+      statusEl.textContent = "Couldn't load trailing P/E — " + String(e.message || e);
+      statusEl.className = "watchlist-chart-status err";
+    }
+  }
+}
+
+function toggleWatchlistPeAverage() {
+  watchlistPeShowAverage = !watchlistPeShowAverage;
+  document.getElementById("btnWatchlistPeAverage").setAttribute("aria-pressed", String(watchlistPeShowAverage));
+  renderPeChart("watchlistPeChart", watchlistPeHistory, watchlistPeShowAverage);
+}
+
+function renderPeChart(svgId, points, showAvg) {
+  const svg = document.getElementById(svgId);
   if (!svg) return;
   [...svg.childNodes].forEach(n => { if (!["title", "desc"].includes(n.nodeName)) n.remove(); });
   if (!points || !points.length) return;   // caller already set the status message
 
-  const VBw = 920, VBh = 170, padL = 50, padR = 14, padT = 14, padB = 24;
+  const VBw = svg.viewBox.baseVal.width || 920, VBh = svg.viewBox.baseVal.height || 170;
+  const padL = 50, padR = 14, padT = 14, padB = 24;
   const plotW = VBw - padL - padR, plotH = VBh - padT - padB;
   const vals = points.map(p => p.pe);
-  const ticks = niceTicks(Math.min(...vals), Math.max(...vals), 4);
+  const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+  const domainVals = showAvg ? vals.concat([avg]) : vals;
+  const ticks = niceTicks(Math.min(...domainVals), Math.max(...domainVals), 4);
   const yMin = ticks[0], yMax = ticks[ticks.length - 1];
   const X = (i) => padL + (plotW * i) / (points.length - 1 || 1);
   const Y = (v) => padT + plotH - ((v - yMin) / (yMax - yMin || 1)) * plotH;
@@ -2581,6 +2656,17 @@ function renderPeChart(points) {
     t.textContent = points[i].date;
     svg.append(t);
   });
+
+  if (showAvg) {
+    const y = Y(avg);
+    svg.append(el("line", { x1: padL, y1: y, x2: padL + plotW, y2: y,
+      stroke: "#ffd966", "stroke-width": "1.6", "stroke-dasharray": "5 4",
+      "stroke-linejoin": "round", "stroke-linecap": "round" }));
+    const avgLabel = el("text", { x: padL + 6, y: y - 6, "text-anchor": "start",
+      fill: "#ffd966", "font-size": "11", "font-weight": "700", "font-family": "inherit" });
+    avgLabel.textContent = "avg " + avg.toFixed(1) + "x";
+    svg.append(avgLabel);
+  }
 
   const color = vals[vals.length - 1] >= vals[0] ? "#35c294" : "#ff8f8f";
   const d = vals.map((v, i) => `${i ? "L" : "M"}${X(i).toFixed(2)},${Y(v).toFixed(2)}`).join(" ");
@@ -4538,9 +4624,13 @@ function openWatchlistChart(ticker) {
   // Lets a plain lookup (not yet on your list) offer to save itself, without
   // making "view a chart" and "track this ticker" the same action.
   document.getElementById("btnWatchlistModalAdd").hidden = watchlistTickers.includes(ticker);
+  watchlistPeShowAverage = false;
+  document.getElementById("btnWatchlistPeAverage").setAttribute("aria-pressed", "false");
+  document.getElementById("watchlistPeSection").hidden = false;
   openModalEl(document.getElementById("watchlistChartModal"));
   loadWatchlistChart();
   loadWatchlistSnapshot();   // fire-and-forget — supplementary chrome, never blocks the chart
+  loadWatchlistPeHistory();  // fire-and-forget — same idea
 }
 
 // Look up any ticker's chart/snapshot without requiring it to already be on
@@ -4571,6 +4661,7 @@ function openOptionsChart(contractSymbol) {
   snapshotGrid.hidden = true;
   snapshotGrid.innerHTML = "";
   document.getElementById("btnWatchlistModalAdd").hidden = true;
+  document.getElementById("watchlistPeSection").hidden = true;   // P/E doesn't apply to an option contract
   openModalEl(document.getElementById("watchlistChartModal"));
   loadWatchlistChart();
 }
@@ -4662,7 +4753,11 @@ document.getElementById("watchlistRangeRow").addEventListener("click", (ev) => {
   watchlistChartRange = btn.dataset.range;
   updateWatchlistRangeButtons();
   loadWatchlistChart();
+  loadWatchlistPeHistory();
 });
+
+document.getElementById("btnPeAverage").addEventListener("click", togglePeAverage);
+document.getElementById("btnWatchlistPeAverage").addEventListener("click", toggleWatchlistPeAverage);
 
 document.getElementById("watchlistBenchmarkToggle").addEventListener("click", (ev) => {
   watchlistBenchmarkOn = !watchlistBenchmarkOn;

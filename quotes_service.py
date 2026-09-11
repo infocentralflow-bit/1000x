@@ -245,7 +245,7 @@ def fetch_trailing_pe_history(ticker, range_key="1y"):
     try:
         t = yf.Ticker(ticker)
         qis = t.quarterly_income_stmt
-        shares = t.fast_info.shares_outstanding
+        shares = t.fast_info.shares
     except Exception as exc:                                          # noqa: BLE001
         result = (None, str(exc) or "Couldn't reach the earnings data.")
         _PE_HISTORY_CACHE[key] = (now, result)
