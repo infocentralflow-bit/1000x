@@ -2241,18 +2241,22 @@ const SAMPLE = { ticker: "AAPL", revenue: 391035, netIncome: 93736, eps: 6.11, s
 
 /* Per-scenario assumptions. Defaults match the workbook exactly:
    base 10% / 20x-30x, bear 3% / 8x-12x, bull 18% / 20x-28x. */
-function mkAssumptions(g, peLo, peHi) {
+function mkAssumptions(g, marginPct, peLo, peHi) {
   return {
-    revGrowth: Array(NY).fill(g),   // index 0 unused (base year is an input)
-    niGrowth:  Array(NY).fill(g),
+    revGrowth: Array(NY).fill(g),          // index 0 unused (base year is an input)
+    margin:    Array(NY).fill(marginPct),  // net margin assumption — drives net income off revenue
     peLow:     Array(NY).fill(peLo),
     peHigh:    Array(NY).fill(peHi),
   };
 }
+// All three scenarios default to the same illustrative margin (matching the
+// sample company's actual ~24%) — same convention as the PE defaults below:
+// a reasonable starting point, meant to be edited for whatever company is
+// actually loaded.
 const assumptions = {
-  base: mkAssumptions(0.10, 20, 30),
-  bear: mkAssumptions(0.03,  8, 12),
-  bull: mkAssumptions(0.18, 20, 28),
+  base: mkAssumptions(0.10, 0.24, 20, 30),
+  bear: mkAssumptions(0.03, 0.24,  8, 12),
+  bull: mkAssumptions(0.18, 0.24, 20, 28),
 };
 
 /* Buy/sell zone — a price band the user sets by hand per projection, shown
@@ -2309,16 +2313,17 @@ const safeDiv = (a, b) => (b === 0 || !isFinite(b) ? 0 : a / b);
 /** Compute one scenario exactly as the sheet does. */
 function computeScenario(key) {
   const a = assumptions[key];
-  const revenue = [], netIncome = [], margin = [], shares = [], eps = [],
+  const revenue = [], netIncome = [], shares = [], eps = [],
         priceLow = [], priceHigh = [], priceMid = [];
 
   for (let t = 0; t < NY; t++) {
     // C25 = Co_Revenue ; D25 = C25*(1+D26)
-    revenue[t]   = t === 0 ? company.revenue   : revenue[t - 1]   * (1 + a.revGrowth[t]);
-    // C27 = Co_NetIncome ; D27 = C27*(1+D28)
-    netIncome[t] = t === 0 ? company.netIncome : netIncome[t - 1] * (1 + a.niGrowth[t]);
-    // C29 = IFERROR(C27/C25,0)
-    margin[t]    = safeDiv(netIncome[t], revenue[t]);
+    revenue[t]   = t === 0 ? company.revenue   : revenue[t - 1] * (1 + a.revGrowth[t]);
+    // Net income is driven off revenue by the margin assumption, not by its
+    // own independent growth rate — otherwise revenue growth would have no
+    // effect on net income, EPS, or price at all (the two would just be
+    // parallel, unconnected series).
+    netIncome[t] = t === 0 ? company.netIncome : revenue[t] * a.margin[t];
     // C30 = Co_Shares ; D30 = C30  (flat across years)
     shares[t]    = company.shares;
     // C31 = Co_EPS (reported) ; D31 = IFERROR(D27/D30,0)
@@ -2332,7 +2337,7 @@ function computeScenario(key) {
   const cagr = (arr) => (arr[0] > 0 && arr[NY - 1] > 0
     ? Math.pow(arr[NY - 1] / arr[0], 1 / (NY - 1)) - 1 : 0);
 
-  return { revenue, netIncome, margin, shares, eps, priceLow, priceHigh, priceMid,
+  return { revenue, netIncome, shares, eps, priceLow, priceHigh, priceMid,
            cagrLow: cagr(priceLow), cagrHigh: cagr(priceHigh) };
 }
 
@@ -2740,6 +2745,40 @@ function persist() {
   updateDirtyUI();
 }
 
+// Old saves stored a "niGrowth" (Net Income Growth %) assumption instead of
+// "margin" — net income used to compound at its own independent rate rather
+// than being derived from revenue × margin (see computeScenario). Loading
+// one of those without translation would silently reset its margin to the
+// fresh default and change that projection's numbers. Since margin[t] =
+// netIncome[t]/revenue[t] under the old model, the exact margin path a save
+// was implicitly using is reconstructible from its own stored niGrowth and
+// revGrowth arrays: margin[t] = margin[t-1] * (1+niGrowth[t])/(1+revGrowth[t]),
+// anchored at the actual reported year-0 margin — reproducing the old
+// model's numbers exactly under the new one.
+function migrateNiGrowthToMargin(stored, companyRevenue, companyNetIncome) {
+  const niGrowth = stored.niGrowth, revGrowth = stored.revGrowth;
+  if (!Array.isArray(niGrowth) || niGrowth.length !== NY || !Array.isArray(revGrowth) || revGrowth.length !== NY) {
+    return null;
+  }
+  const margin = [safeDiv(companyNetIncome, companyRevenue)];
+  for (let t = 1; t < NY; t++) {
+    const denom = 1 + Number(revGrowth[t]);
+    margin[t] = margin[t - 1] * (1 + Number(niGrowth[t])) / (denom || 1);
+  }
+  return margin;
+}
+
+function applyStoredAssumptions(k, stored) {
+  for (const f of ["revGrowth", "margin", "peLow", "peHigh"]) {
+    const arr = stored[f];
+    if (Array.isArray(arr) && arr.length === NY) assumptions[k][f] = arr.map(Number);
+  }
+  if (!Array.isArray(stored.margin) || stored.margin.length !== NY) {
+    const migrated = migrateNiGrowthToMargin(stored, company.revenue, company.netIncome);
+    if (migrated) assumptions[k].margin = migrated;
+  }
+}
+
 function restore() {
   try {
     const raw = localStorage.getItem(STORE_KEY);
@@ -2751,10 +2790,7 @@ function restore() {
     if (s.assumptions) {
       for (const k of ["base", "bear", "bull"]) {
         if (!s.assumptions[k]) continue;
-        for (const f of ["revGrowth", "niGrowth", "peLow", "peHigh"]) {
-          const arr = s.assumptions[k][f];
-          if (Array.isArray(arr) && arr.length === NY) assumptions[k][f] = arr.map(Number);
-        }
+        applyStoredAssumptions(k, s.assumptions[k]);
       }
     }
     if (s.netWorth && typeof s.netWorth === "object") nw = normalizeNW(s.netWorth);
@@ -2914,10 +2950,7 @@ function loadProjectById(id) {
   if (p.assumptions) {
     for (const k of ["base", "bear", "bull"]) {
       if (!p.assumptions[k]) continue;
-      for (const f of ["revGrowth", "niGrowth", "peLow", "peHigh"]) {
-        const arr = p.assumptions[k][f];
-        if (Array.isArray(arr) && arr.length === NY) assumptions[k][f] = arr.map(Number);
-      }
+      applyStoredAssumptions(k, p.assumptions[k]);
     }
   }
   zones = normalizeZones(p.zones);
@@ -2957,9 +2990,9 @@ function startNewProject() {
     }
   }
   company = { ticker: "", revenue: 0, netIncome: 0, eps: 0, shares: 0 };
-  assumptions.base = mkAssumptions(0.10, 20, 30);
-  assumptions.bear = mkAssumptions(0.03, 8, 12);
-  assumptions.bull = mkAssumptions(0.18, 20, 28);
+  assumptions.base = mkAssumptions(0.10, 0.24, 20, 30);
+  assumptions.bear = mkAssumptions(0.03, 0.24,  8, 12);
+  assumptions.bull = mkAssumptions(0.18, 0.24, 20, 28);
   zones = { buy: { low: 0, high: 0 }, sell: { low: 0, high: 0 } };
   liveQuote = null;
   clearPeChart();
@@ -3080,7 +3113,7 @@ function persistNotionToActiveProject() {
 function notionScenarioPayload(key) {
   const r = results[key], a = assumptions[key];
   return {
-    revGrowth: a.revGrowth, niGrowth: a.niGrowth, peLow: a.peLow, peHigh: a.peHigh,
+    revGrowth: a.revGrowth, margin: a.margin, peLow: a.peLow, peHigh: a.peHigh,
     revenue: r.revenue, netIncome: r.netIncome, eps: r.eps,
     priceLow: r.priceLow, priceHigh: r.priceHigh,
     cagrLow: r.cagrLow, cagrHigh: r.cagrHigh,
@@ -3898,7 +3931,7 @@ function renderScenarios() {
           </button>
           ${note ? `<span class="rowlabel-note">${note}</span>` : ""}
         </th>
-        ${YEARS.map((y, i) => i === 0 && (field === "revGrowth" || field === "niGrowth")
+        ${YEARS.map((y, i) => i === 0 && (field === "revGrowth" || field === "margin")
           ? `<td class="dash${y0(i)}">${EMDASH}</td>`
           : `<td class="cellinput${y0(i)}"><input class="cell-edit" type="text" inputmode="decimal" autocomplete="off"
                value="${fmtV(arr[i])}" data-sc="${k}" data-field="${field}" data-i="${i}"
@@ -3925,8 +3958,7 @@ function renderScenarios() {
               ${rowStatic("Revenue", "$ millions", r.revenue, fmtM, (i) => i === 0 ? "link" : "calc", false, "revenue")}
               ${rowInput("Revenue Growth", "% per year", a.revGrowth, "revGrowth", (v) => (v * 100).toFixed(1))}
               ${rowStatic("Net Income", "$ millions", r.netIncome, fmtM, (i) => i === 0 ? "link" : "calc", true, "netIncome")}
-              ${rowInput("Net Income Growth", "% per year", a.niGrowth, "niGrowth", (v) => (v * 100).toFixed(1))}
-              ${rowStatic("Net Income Margin", "net income ÷ revenue", r.margin, fmtPct, () => "calc", false, "margin")}
+              ${rowInput("Net Margin", "% of revenue", a.margin, "margin", (v) => (v * 100).toFixed(1))}
               ${rowStatic("Shares Outstanding", "millions · flat", r.shares, fmtNum, (i) => i === 0 ? "link" : "calc", true, "shares")}
               ${rowStatic("EPS", "$ per share", r.eps, fmt$, (i) => i === 0 ? "link" : "calc", false, "eps")}
               ${rowInput("P/E Low", "multiple", a.peLow, "peLow", (v) => v.toFixed(1), true)}
@@ -3976,7 +4008,7 @@ function renderScenarios() {
 
 const CELL_FIELD_FMT = {
   revGrowth: (v) => (v * 100).toFixed(1),
-  niGrowth: (v) => (v * 100).toFixed(1),
+  margin: (v) => (v * 100).toFixed(1),
   peLow: (v) => v.toFixed(1),
   peHigh: (v) => v.toFixed(1),
 };
@@ -3985,7 +4017,7 @@ const CELL_FIELD_FMT = {
    return object — used by updateDerivedCells() to refresh derived <td>s by
    metric name without needing to know the table layout. */
 const DERIVED_FMT = {
-  revenue: fmtM, netIncome: fmtM, margin: fmtPct, shares: fmtNum,
+  revenue: fmtM, netIncome: fmtM, shares: fmtNum,
   eps: fmt$, priceLow: fmt$, priceHigh: fmt$, cagrLow: fmtPct, cagrHigh: fmtPct,
 };
 
@@ -4017,7 +4049,7 @@ function onCellEdit(ev) {
   const sc = inp.dataset.sc, field = inp.dataset.field, i = +inp.dataset.i;
   const raw = parseFloat(sanitizeNumericInput(inp));
   if (!isFinite(raw)) return;
-  const val = (field === "revGrowth" || field === "niGrowth") ? raw / 100 : raw;
+  const val = (field === "revGrowth" || field === "margin") ? raw / 100 : raw;
 
   assumptions[sc][field][i] = val;
   markSource("manual");
@@ -4038,7 +4070,7 @@ function onCellEdit(ev) {
    copied across every remaining year in that row for that scenario, instead
    of retyping the same number into 2027, 2028, 2029 and 2030 by hand. */
 function firstEditableYearIndex(field) {
-  if (field === "revGrowth" || field === "niGrowth") return 1; // 2026 has no growth cell, it's the input year
+  if (field === "revGrowth" || field === "margin") return 1; // 2026's actual value is given, not assumed
   return locked ? 1 : 0; // P/E: 2026 is editable unless the base year is locked
 }
 function fillRow(sc, field) {

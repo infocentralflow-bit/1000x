@@ -962,7 +962,7 @@ def refresh_chain(ticker, api_key):
 # in dashboard.html; this only formats numbers it already computed into
 # Notion's block JSON. Scenario shape mirrors computeScenario() there:
 # revenue/netIncome/eps/priceLow/priceHigh arrays (one entry per year), plus
-# cagrLow/cagrHigh and the revGrowth/niGrowth/peLow/peHigh assumption arrays.
+# cagrLow/cagrHigh and the revGrowth/margin/peLow/peHigh assumption arrays.
 #
 # v1 deliberately has no "current price" field — nothing in this app fetches
 # a live quote today (Alpha Vantage is called here for fundamentals only), so
@@ -1068,7 +1068,7 @@ def build_projection_blocks(payload):
 
         assumptions_line = (
             f"Revenue growth {_summarize_series(sc.get('revGrowth', [])[1:], _fmt_pct)} · "
-            f"Net income growth {_summarize_series(sc.get('niGrowth', [])[1:], _fmt_pct)} · "
+            f"Net margin {_summarize_series(sc.get('margin', [])[1:], _fmt_pct)} · "
             f"P/E {_summarize_series(sc.get('peLow', []), _fmt_x)}"
             f"–{_summarize_series(sc.get('peHigh', []), _fmt_x)}"
         )
