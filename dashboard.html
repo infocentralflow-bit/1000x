@@ -4034,6 +4034,23 @@ function renderScenarios() {
     // (fraction <-> percent), so they're the ones this was corrupting.
     inp.addEventListener("blur", () => {
       const sc = inp.dataset.sc, field = inp.dataset.field, i = +inp.dataset.i;
+      // Clearing a Net Income Growth cell to empty and leaving it is how you
+      // undo an explicit override — it goes back to auto (null), tracking
+      // Revenue Growth again, rather than snapping back to whatever number
+      // was there before you cleared it.
+      if (field === "niGrowth" && sanitizeNumericInput(inp) === "" && assumptions[sc].niGrowth[i] != null) {
+        assumptions[sc].niGrowth[i] = null;
+        inp.classList.add("cell-auto");
+        inp.title = "Tracking Revenue Growth — type a value to override this year";
+        markSource("manual");
+        recompute();
+        persist();
+        renderChart();
+        renderSummary();
+        renderUpside();
+        updateDerivedCells();
+        updateDerivedKPI();
+      }
       let val = assumptions[sc][field][i];
       if (field === "niGrowth" && val == null) val = assumptions[sc].revGrowth[i];
       const fmt = CELL_FIELD_FMT[field];
