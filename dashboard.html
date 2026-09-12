@@ -2783,13 +2783,25 @@ function applyStoredAssumptions(k, stored) {
     const arr = stored[f];
     if (Array.isArray(arr) && arr.length === NY) assumptions[k][f] = arr.map(Number);
   }
+  const revGrowth = assumptions[k].revGrowth;
+  // Every save made before today's change (classic AND the brief margin
+  // format) had every year's Net Income Growth start out numerically equal
+  // to Revenue Growth (mkAssumptions used to fill both arrays with the same
+  // rate) — a year only ever diverged from that if someone typed a
+  // different number into it. So a stored/derived value that still matches
+  // Revenue Growth for that year almost certainly means "never touched",
+  // and should load as auto (null) so it resumes tracking Revenue Growth —
+  // otherwise every pre-existing project loads permanently frozen at its
+  // old numbers, silently reproducing the very bug this model change fixed.
+  // Only years that actually diverge (someone customized them) stay pinned
+  // as an explicit override, preserving the save's real numbers exactly.
+  const collapseToAuto = (arr) => arr.map((v, i) =>
+    v == null || Math.abs(Number(v) - revGrowth[i]) < 1e-9 ? null : Number(v));
   if (Array.isArray(stored.niGrowth) && stored.niGrowth.length === NY) {
-    // Classic saves (all explicit numbers) and current saves (some years
-    // possibly null/auto) both load as-is — only coerce the non-null entries.
-    assumptions[k].niGrowth = stored.niGrowth.map(v => (v == null ? null : Number(v)));
+    assumptions[k].niGrowth = collapseToAuto(stored.niGrowth);
   } else if (Array.isArray(stored.margin) && stored.margin.length === NY) {
     const derived = deriveNiGrowthFromMargin(stored, company.revenue, company.netIncome);
-    if (derived) assumptions[k].niGrowth = derived;
+    if (derived) assumptions[k].niGrowth = collapseToAuto(derived);
   }
   // else: no recognizable Net Income assumption in the save — leave the
   // fresh default (all null, i.e. auto-tracking Revenue Growth).
