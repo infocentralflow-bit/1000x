@@ -3966,6 +3966,13 @@ function renderScenarios() {
               <path d="M2 8h10M8.5 4l4 4-4 4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
           </button>
+          ${field === "niGrowth" ? `
+          <button type="button" class="fill-btn" data-reset-auto-sc="${k}"
+            title="Reset every year back to tracking Revenue Growth" aria-label="Reset ${label} to auto for ${s.label}">
+            <svg width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3.6h-3.6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>` : ""}
           ${note ? `<span class="rowlabel-note">${note}</span>` : ""}
         </th>
         ${YEARS.map((y, i) => i === 0 && (field === "revGrowth" || field === "niGrowth")
@@ -4059,8 +4066,31 @@ function renderScenarios() {
   });
 
   host.querySelectorAll(".fill-btn").forEach(btn => {
-    btn.addEventListener("click", () => fillRow(btn.dataset.fillSc, btn.dataset.fillField));
+    if (btn.dataset.resetAutoSc) {
+      btn.addEventListener("click", () => resetNiGrowthToAuto(btn.dataset.resetAutoSc));
+    } else {
+      btn.addEventListener("click", () => fillRow(btn.dataset.fillSc, btn.dataset.fillField));
+    }
   });
+}
+
+/* Undoes every explicit Net Income Growth override in one click — sets the
+   whole row back to null (auto), so every year resumes tracking Revenue
+   Growth. The per-cell way to do this is clearing one cell to empty, but
+   clearing four cells by hand to undo an old override (e.g. from before
+   auto-tracking existed, or just from having typed values across the row
+   the way Revenue Growth is normally filled) is tedious enough that it
+   reads as "broken" rather than "by design" — this is the one-click fix. */
+function resetNiGrowthToAuto(sc) {
+  assumptions[sc].niGrowth = Array(NY).fill(null);
+  markSource("manual");
+  recompute();
+  persist();
+  renderChart();
+  renderSummary();
+  renderUpside();
+  renderScenarios();
+  updateDerivedKPI();
 }
 
 const CELL_FIELD_FMT = {
