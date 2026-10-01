@@ -3,6 +3,7 @@
 saves/
 notion_settings.json
 watchlist.json
+portfolio.json
 __pycache__/
 *.pyc
 .app-profile/
