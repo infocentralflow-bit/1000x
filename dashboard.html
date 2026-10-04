@@ -234,8 +234,17 @@ body {
 .watchlist-chart-meta .wl-change { font-size: 13px; }
 .watchlist-chart-status { margin-top: 10px; font-size: 12px; color: var(--text-muted); text-align: center; }
 .watchlist-chart-status.err { color: #ff9d9d; }
-.watchlist-range-row { display: flex; gap: 5px; margin-bottom: 12px; }
+.watchlist-range-row {
+  display: flex; gap: 5px; margin-bottom: 12px;
+  /* Chart-range tabs are a fixed 7 items, but this row is shared with the
+     options expiration-date tabs, which can run well past what any phone
+     width fits — scroll instead of silently clipping the tail (confirmed on
+     a 375px screen: "YTD" used to render as "YT" with no way to reach it). */
+  overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none;
+}
+.watchlist-range-row::-webkit-scrollbar { display: none; }
 .wl-range-btn {
+  flex: none; white-space: nowrap;
   padding: 5px 10px; border-radius: var(--r-sm);
   border: 1px solid var(--hairline); background: var(--surface-2);
   color: var(--text-muted); font: inherit; font-size: 11.5px; font-weight: 650;
@@ -756,7 +765,7 @@ textarea.notion-notes:not([disabled]):placeholder-shown { background: var(--gold
    is used inside. This is the only visual cue mobile users get that a
    table/chart wider than the screen has more to see — overflow-x:auto alone
    is invisible until you've already swiped by accident. */
-.chart-wrap, .table-scroll {
+.chart-wrap, .table-scroll, .watchlist-range-row {
   background:
     linear-gradient(to right, var(--surface-1) 30%, rgba(0,0,0,0)) 0 0,
     linear-gradient(to right, rgba(0,0,0,0), var(--surface-1) 70%) 100% 0,
@@ -837,7 +846,16 @@ table.opt-chain th.opt-side-head {
 table.opt-chain th.opt-side-call { color: #35c294; }
 table.opt-chain th.opt-side-put  { color: #ff8f8f; }
 table.opt-chain th.opt-strike-head, table.opt-chain td.opt-strike {
-  text-align: center; background: rgba(255,255,255,.035);
+  /* Sticky, not just centered — this table is 17 columns wide (8 call + 8
+     put, sharing Strike), so on a phone the strike price your calls/puts
+     numbers actually belong to can be a full screen-width of horizontal
+     scroll away in either direction. Pinning it to the left edge once
+     scrolled past keeps that anchor on screen while reading puts data;
+     border-collapse:separate (already set on table.summary) is required
+     for sticky to render correctly on table cells. */
+  position: sticky; left: 0; z-index: 2;
+  box-shadow: 2px 0 6px rgba(0,0,0,.35);
+  text-align: center; background: linear-gradient(rgba(255,255,255,.035), rgba(255,255,255,.035)), var(--surface-1);
   border-left: 1px solid var(--hairline); border-right: 1px solid var(--hairline);
 }
 table.opt-chain td.opt-strike { font-weight: 700; }
@@ -1322,6 +1340,31 @@ footer.legal code {
   .watchlist-search-form { width: 108px; }
 }
 
+/* ── Phone-width fixes (narrower than the general ≤720px tablet pass above) ──
+   Each of these was confirmed as an actual clipped/illegible element on a
+   375px viewport, not a guess — see the mobile-optimization session notes. */
+@media (max-width: 480px) {
+  /* The search form (fixed 108px from the rule above) left so little room
+     for the ticker strip next to it that both the search placeholder and
+     the "No tickers yet" message rendered mid-word-truncated with no
+     ellipsis and no way to read the rest. Give the search form its own
+     full-width row instead of fighting the ticker strip for space. */
+  .watchlist-bar { flex-wrap: wrap; row-gap: 8px; }
+  .watchlist-search-form { width: 100%; }
+  .watchlist-sep { display: none; }
+
+  /* table.summary headers are frequently two words ("Net worth", "Return
+     earned", "Price Low"...) and white-space:nowrap forces each column to
+     the header's full single-line width — on a phone that pushes whichever
+     column is last (often the one with the actual answer, e.g. a net worth
+     table's own "Net worth" column) just past the scrollable edge, under
+     the fade mask, with nothing visibly indicating it's cut off. Letting
+     headers wrap to two lines lets columns size to their longest *word*
+     instead, which is usually narrower than the whole table's viewport. */
+  table.summary thead th { white-space: normal; line-height: 1.25; vertical-align: bottom; }
+  table.summary th, table.summary td { padding: 6px 7px; font-size: 11.5px; }
+}
+
 /* ── iPhone / touch adaptation (additive — desktop mouse layout above is untouched) ── */
 @media (pointer: coarse) {
   .icon-btn { width: 44px; height: 44px; }
@@ -1618,7 +1661,7 @@ footer.legal code {
       <button data-metric="priceMid"  aria-pressed="false">Share Price</button>
     </div>
     <span class="hint" style="color:var(--text-muted);font-size:11.5px">
-      Hover or focus the chart and use ← → to read values
+      Hover, tap, or focus the chart — use ← → to read values
     </span>
   </div>
 
@@ -1822,7 +1865,7 @@ footer.legal code {
         <button data-yrs="30" aria-pressed="false">30 yr</button>
       </div>
       <span class="hint" style="color:var(--text-muted);font-size:11.5px">
-        Hover or focus the chart and use ← → to read values
+        Hover, tap, or focus the chart — use ← → to read values
       </span>
     </div>
 
@@ -5714,6 +5757,27 @@ function attachNWHover(X) {
     nwHoverIdx = Math.min(N - 1, Math.max(0, cur + (e.key === "ArrowRight" ? 1 : -1)));
     showNWTooltip(nwHoverIdx, X);
   });
+
+  // Touch support — additive, parallel to the mouse listeners above; mirrors
+  // attachHover()'s approach (this chart previously had no touch handling at
+  // all, so the tooltip was unreachable on a phone).
+  const N = nwResults.years + 1;
+  const pickIndexFromClientX = (clientX) => {
+    const rect = svg.getBoundingClientRect();
+    const scale = rect.width / NW_VB.w;
+    const localX = (clientX - rect.left) / scale;
+    const bw = (NW_VB.w - NW_PAD.l - NW_PAD.r) / (N - 1 || 1);
+    return Math.max(0, Math.min(N - 1, Math.round((localX - NW_PAD.l) / bw)));
+  };
+  const touchUpdate = (ev) => {
+    const t = ev.touches[0] || ev.changedTouches[0];
+    if (!t) return;
+    nwHoverIdx = pickIndexFromClientX(t.clientX);
+    showNWTooltip(nwHoverIdx, X);
+  };
+  svg.addEventListener("touchstart", touchUpdate, { passive: true });
+  svg.addEventListener("touchmove", touchUpdate, { passive: true });
+  svg.addEventListener("touchend", hideNWTooltip, { passive: true });
 }
 
 function showNWTooltip(i, X) {
@@ -6883,6 +6947,40 @@ function wirePortfolioDragReorder(tbody) {
       if (pfDragSourceId) reorderPosition(pfDragSourceId, row.dataset.rowId);
       pfDragSourceId = null;
     });
+  });
+
+  // Touch fallback — native HTML5 drag-and-drop (above) isn't supported via
+  // touch on iOS/Android, so the handle's touch-action:none (set for exactly
+  // this) was otherwise inert on a phone. Pointer position via
+  // elementFromPoint stands in for the dragover/drop targeting mouse DnD
+  // gets for free.
+  let touchSourceId = null, touchTargetRow = null;
+  tbody.querySelectorAll(".pf-drag-handle").forEach(handle => {
+    handle.addEventListener("touchstart", () => {
+      const row = handle.closest("tr[draggable]");
+      if (!row) return;
+      touchSourceId = row.dataset.rowId;
+      row.classList.add("pf-row-dragging");
+    }, { passive: true });
+
+    handle.addEventListener("touchmove", (e) => {
+      if (!touchSourceId) return;
+      e.preventDefault(); // suppress page scroll while actively reordering
+      const t = e.touches[0];
+      const el = document.elementFromPoint(t.clientX, t.clientY);
+      const row = el && el.closest ? el.closest("tr[draggable]") : null;
+      if (touchTargetRow && touchTargetRow !== row) touchTargetRow.classList.remove("pf-row-dragover");
+      touchTargetRow = row || null;
+      if (touchTargetRow) touchTargetRow.classList.add("pf-row-dragover");
+    }, { passive: false });
+
+    handle.addEventListener("touchend", () => {
+      const sourceRow = touchSourceId && tbody.querySelector(`tr[data-row-id="${touchSourceId}"]`);
+      if (sourceRow) sourceRow.classList.remove("pf-row-dragging");
+      if (touchTargetRow) touchTargetRow.classList.remove("pf-row-dragover");
+      if (touchSourceId && touchTargetRow) reorderPosition(touchSourceId, touchTargetRow.dataset.rowId);
+      touchSourceId = null; touchTargetRow = null;
+    }, { passive: true });
   });
 }
 
