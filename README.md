@@ -211,8 +211,7 @@ most vivid red/green combinations in this lightness band do.
 | `excel_bridge.py` | Local server: reads the workbook, drives Excel, calls the API, hosts saved-projection files |
 | `notion_service.py` | Notion API client used by the Notion Research feature |
 | `quotes_service.py` | yfinance wrapper used by the watchlist strip |
-| `option_ai.py` | Optional Claude explanation for Option Insight (prose only — no math) |
-| `tests/` | `node tests/option_math.test.js` (option pricing math) and `python3 -m unittest tests/test_option_ai.py` |
+| `tests/` | `node tests/option_math.test.js` (option pricing math) |
 | `run_dashboard.bat` | One-click launcher (asks for login) |
 | `launch_app.py` / desktop shortcut | Silent launcher for the no-login local app window |
 | `start_tunnel.bat` | ngrok tunnel for cellular access |
@@ -226,7 +225,6 @@ most vivid red/green combinations in this lightness band do.
 - `pywin32` — optional, enables the real Excel Power Query refresh (path 1)
 - `yfinance` — optional, powers the watchlist strip; without it, watchlist tickers just show
   "no quote" instead of a price
-- `anthropic` — optional, only for Option Insight's **Explain with AI** button
 
 ```bash
 pip install openpyxl pywin32 yfinance
@@ -337,10 +335,6 @@ the contract is fetched — plus your bear / base / bull stock targets, then cli
 - **General Insight** labels (Break-even requirement, Time decay, IV risk, Thesis fit, Upside
   leverage) come from fixed thresholds in `INSIGHT_THRESHOLDS` in `dashboard.html`, and the
   summary paragraph is a template filled with the calculated numbers.
-- **Explain with AI** (optional): set `ANTHROPIC_API_KEY` on the server (in Render's
-  environment variables, or as a local env var) and the button appears. It sends only the
-  already-calculated numbers to Claude and asks for a plain-English explanation — Claude
-  does no math. Results are cached for 10 minutes and calls are spaced 5 seconds apart.
 
 All of the math lives in the `OptionMath` block of `dashboard.html`; run
 `node tests/option_math.test.js` to check it against textbook values.

@@ -40,7 +40,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import openpyxl
 
 import notion_service
-import option_ai
 import quotes_service
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -1109,8 +1108,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/health":
             self._json({"ok": True, "workbook": WORKBOOK,
                         "workbookExists": os.path.exists(WORKBOOK),
-                        "authEnabled": AUTH_ENABLED,
-                        "aiConfigured": option_ai.configured()})
+                        "authEnabled": AUTH_ENABLED})
             return
 
         if path == "/api/model":
@@ -1330,20 +1328,6 @@ class Handler(BaseHTTPRequestHandler):
                 return
             _, updated_at_ms = get_portfolio()
             self._json({"positions": result, "updatedAt": updated_at_ms})
-            return
-
-        if path == "/api/options/explain":
-            # Option Insight: the browser computed every number; this only
-            # turns them into prose (see option_ai.py).
-            if not option_ai.configured():
-                self._json({"error": "AI explanations aren't configured on the server."}, 400)
-                return
-            if int(self.headers.get("Content-Length") or 0) > 2 * option_ai.MAX_FACTS_BYTES:
-                self._json({"error": "Request too large."}, 413)
-                return
-            payload = self._read_json_body()
-            text, err, status = option_ai.explain(payload.get("facts") if isinstance(payload, dict) else None)
-            self._json({"text": text} if text else {"error": err}, status)
             return
 
         if path == "/api/notion/settings":
@@ -1567,8 +1551,6 @@ def main():
         print("  notion   : token set" + (f" — syncing to \"{settings['databaseName']}\"" if settings else " — no database selected yet"))
     else:
         print("  notion   : not configured — set NOTION_TOKEN to enable Notion Research")
-    print("  options  : AI explanations " + ("on (Claude)" if option_ai.configured()
-                                             else "off — set ANTHROPIC_API_KEY to enable"))
 
     url = f"http://127.0.0.1:{PORT}/"
     print(f"  serving  : {url}" if not IS_CLOUD else f"  serving  : 0.0.0.0:{PORT}")

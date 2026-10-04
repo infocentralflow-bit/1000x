@@ -976,9 +976,6 @@ table.summary.oi-table tr.oi-row-hl td, table.summary.oi-table tr.oi-row-hl th {
 .oi-cat.tone-bad .dot { background: #ff8f8f; }
 .oi-cat .why { margin-top: 4px; font-size: 11.5px; color: var(--text-muted); line-height: 1.45; }
 .oi-summary { margin: 16px 0 0; font-size: 14px; line-height: 1.65; color: var(--text-secondary); }
-.oi-ai { margin-top: 14px; padding: 14px 16px; border-radius: var(--r-sm); background: var(--surface-2); border: 1px solid var(--hairline); }
-.oi-ai-head { font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px; }
-.oi-ai-text { margin: 0; font-size: 14px; line-height: 1.65; color: var(--text-secondary); white-space: pre-wrap; }
 
 @media (max-width: 900px) {
   .oi-time-layout { grid-template-columns: minmax(0, 1fr); }
@@ -2493,13 +2490,6 @@ footer.legal code {
       <div class="card-body">
         <div class="oi-cats" id="oiCats"></div>
         <p class="oi-summary" id="oiSummary"></p>
-        <div style="margin-top:14px" id="oiAiRow" hidden>
-          <button type="button" id="oiAiBtn" class="btn btn-ghost">Explain with AI</button>
-        </div>
-        <div class="oi-ai" id="oiAi" hidden>
-          <div class="oi-ai-head">AI explanation · from the numbers above</div>
-          <p class="oi-ai-text" id="oiAiText"></p>
-        </div>
       </div>
     </div>
     <p class="oi-note">Estimates use the Black–Scholes–Merton model (European exercise, constant rate and dividend yield) and are floored at intrinsic value; at expiration the option is worth exactly its intrinsic value. Real prices also move with bid/ask spreads, skew and early-exercise effects. Not financial advice.</p>
@@ -2625,7 +2615,6 @@ function normalizeZones(z) {
 
 let dataSource = "sample";   // sample | workbook | manual | api
 let bridgeUp = false;
-let aiConfigured = false;   // server has an ANTHROPIC_API_KEY (Option Insight's "Explain with AI")
 let authEnabled = false;
 let metric = "revenue";
 let hoverIdx = null;
@@ -4576,8 +4565,7 @@ async function probeBridge() {
     const j = await r.json().catch(() => ({}));
     bridgeUp = r.ok;
     authEnabled = !!j.authEnabled;
-    aiConfigured = !!j.aiConfigured;
-  } catch { bridgeUp = false; authEnabled = false; aiConfigured = false; }
+  } catch { bridgeUp = false; authEnabled = false; }
   document.getElementById("btnSignOut").hidden = !(bridgeUp && authEnabled);
   return bridgeUp;
 }
@@ -4779,8 +4767,7 @@ watchlistAddInput.addEventListener("blur", () => {
 
 /* ── OptionMath:start ──────────────────────────────────────────────────────
    Every number on the Option Insight page comes from here — pure functions,
-   no DOM, no network. The AI explanation only ever sees values computed by
-   this module (see buildOptionFacts); it never does math of its own.
+   no DOM, no network.
    Model: Black–Scholes–Merton (European, continuous dividend yield) before
    expiration, intrinsic value at expiration. Time runs in whole calendar days
    from today, T = days remaining / 365. */
@@ -4994,8 +4981,8 @@ const OptionMath = (() => {
 /* ── Option Insight page ────────────────────────────────────────────────────
    Layers, strictly one-way:
      form inputs → OptionMath (numbers) → buildOptionFacts (one object of
-     computed facts) → renderers / template summary → optional AI prose.
-   The AI endpoint only ever receives the facts object. */
+     computed facts) → renderers / template summary. Free: everything runs
+   in the browser, no paid service is called. */
 const OI_KEY = "optionInsight.inputs.v1";
 const OI_FIELDS = ["ticker", "S", "K", "premium", "exp", "iv", "delta", "gamma", "theta", "vega",
   "bid", "ask", "oi", "volume", "r", "q", "bear", "base", "bull", "target"];
@@ -5022,7 +5009,6 @@ let oi = null;                 // analyzed state; null until a valid Analyze
 let oiType = "call";
 let oiBound = false;
 let oiRaf = 0;
-let aiAnsweredHash = null;
 
 const oiEl = (id) => document.getElementById(id);
 function fmtUsd(v, dec = 2) {
@@ -5160,8 +5146,6 @@ function oiAnalyze({ scroll = true, quiet = false } = {}) {
     pnlDate: "sim", pnlCustomDay: null, pnlY: oi ? oi.pnlY : "pnl",
   };
   oiEl("oiResults").hidden = false;
-  oiEl("oiAi").hidden = true;
-  aiAnsweredHash = null;
   oiSetupControls();
   oiRenderStatic();
   oiRenderPriceChips();
@@ -5858,33 +5842,6 @@ function oiRenderGeneral(f) {
   oiEl("oiCats").innerHTML = items.map(i => `<div class="oi-cat tone-${i.v ? (i.k === "Upside leverage" ? (i.v === "High" ? "good" : "mid") : tone[i.v]) : "mid"}">
     <div class="k">${i.k}</div><div class="v"><span class="dot"></span>${i.v || EMDASH}</div><div class="why">${i.why}</div></div>`).join("");
   oiEl("oiSummary").textContent = oiGeneralSummary(f);
-  oiEl("oiAiRow").hidden = !aiConfigured;
-  if (aiAnsweredHash && aiAnsweredHash !== JSON.stringify(f)) oiEl("oiAi").hidden = true;
-}
-
-async function oiExplainWithAi() {
-  const btn = oiEl("oiAiBtn");
-  const facts = buildOptionFacts();
-  btn.disabled = true;
-  const prev = btn.textContent;
-  btn.textContent = "Explaining…";
-  const box = oiEl("oiAi"), txt = oiEl("oiAiText");
-  try {
-    const r = await fetch(BRIDGE + "/api/options/explain", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ facts }),
-    });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok || !j.text) throw new Error(j.error || "The explanation couldn't be generated.");
-    txt.textContent = j.text;
-    aiAnsweredHash = JSON.stringify(facts);
-  } catch (e) {
-    txt.textContent = (e && e.message ? e.message : "The explanation couldn't be generated.") + " The summary above is still accurate — it's built from the same numbers.";
-    aiAnsweredHash = JSON.stringify(facts);
-  } finally {
-    box.hidden = false;
-    btn.disabled = false;
-    btn.textContent = prev;
-  }
 }
 
 /* ── Wiring (once) ───────────────────────────────────────────────────── */
@@ -5958,14 +5915,12 @@ function oiBindOnce() {
     oiRenderPriceChips(); oiSchedule();
     const inp = oiEl("oiChipInput"); if (inp) inp.focus();
   });
-  oiEl("oiAiBtn").addEventListener("click", oiExplainWithAi);
 }
 
 function renderOptionInsight() {
   const first = !oiBound;
   oiBindOnce();
   oiEl("oiLive").hidden = !bridgeUp;
-  oiEl("oiAiRow").hidden = !aiConfigured;
   if (first) {
     const saved = oiLoadRaw();
     if (saved) { oiWriteRaw(saved); oiAnalyze({ scroll: false, quiet: true }); }
