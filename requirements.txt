@@ -7,3 +7,6 @@ psycopg[binary]>=3.1
 # lazily, so a missing install degrades to per-ticker errors instead of
 # crashing the bridge.
 yfinance>=0.2.40
+# Option Insight's optional "Explain with AI" button (only with
+# ANTHROPIC_API_KEY set). option_ai.py imports it lazily.
+anthropic>=0.70
