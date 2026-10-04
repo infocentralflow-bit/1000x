@@ -236,10 +236,9 @@ body {
 .watchlist-chart-status.err { color: #ff9d9d; }
 .watchlist-range-row {
   display: flex; gap: 5px; margin-bottom: 12px;
-  /* Chart-range tabs are a fixed 7 items, but this row is shared with the
-     options expiration-date tabs, which can run well past what any phone
-     width fits — scroll instead of silently clipping the tail (confirmed on
-     a 375px screen: "YTD" used to render as "YT" with no way to reach it). */
+  /* 7 chart-range tabs don't fit every phone width — scroll instead of
+     silently clipping the tail (confirmed on a 375px screen: "YTD" used to
+     render as "YT" with no way to reach it). */
   overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none;
 }
 .watchlist-range-row::-webkit-scrollbar { display: none; }
@@ -837,37 +836,162 @@ textarea.notion-notes:not([disabled]):placeholder-shown { background: var(--gold
 
 .donut-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
 @media (max-width: 760px) { .donut-row { grid-template-columns: 1fr; } }
-#optionsChainGrid { margin-top: 16px; }
-table.opt-chain thead tr:first-child th { padding-top: 6px; padding-bottom: 6px; }
-table.opt-chain th.opt-side-head {
-  text-align: center; font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
-  border-bottom: 1px solid var(--hairline);
+/* ── Option Insight ──────────────────────────────────────────────────────── */
+.oi-grid {
+  display: grid; gap: 4px 16px;
+  grid-template-columns: repeat(auto-fill, minmax(178px, 1fr));
 }
-table.opt-chain th.opt-side-call { color: #35c294; }
-table.opt-chain th.opt-side-put  { color: #ff8f8f; }
-table.opt-chain th.opt-strike-head, table.opt-chain td.opt-strike {
-  /* Sticky, not just centered — this table is 17 columns wide (8 call + 8
-     put, sharing Strike), so on a phone the strike price your calls/puts
-     numbers actually belong to can be a full screen-width of horizontal
-     scroll away in either direction. Pinning it to the left edge once
-     scrolled past keeps that anchor on screen while reading puts data;
-     border-collapse:separate (already set on table.summary) is required
-     for sticky to render correctly on table cells. */
-  position: sticky; left: 0; z-index: 2;
-  box-shadow: 2px 0 6px rgba(0,0,0,.35);
-  text-align: center; background: linear-gradient(rgba(255,255,255,.035), rgba(255,255,255,.035)), var(--surface-1);
-  border-left: 1px solid var(--hairline); border-right: 1px solid var(--hairline);
+.oi-grid .calc-field { margin-bottom: 12px; }
+.oi-grid .calc-input { font-size: 15.5px; padding: 10px 12px; }
+.oi-req { color: var(--gold); margin-left: 2px; }
+.oi-subhead {
+  margin: 8px 0 12px; padding-top: 14px; border-top: 1px solid var(--hairline);
+  font-size: 11px; font-weight: 700; letter-spacing: .1em; color: var(--text-secondary);
 }
-table.opt-chain td.opt-strike { font-weight: 700; }
-table.opt-chain td.opt-bid { color: #35c294; }
-table.opt-chain td.opt-ask { color: #ff8f8f; }
-table.opt-chain td.opt-itm { background: rgba(255,255,255,.1); }
-table.opt-chain tr.opt-price-row td {
-  background: rgba(255,255,255,.05); padding: 8px 13px; font-weight: 700;
-  border-top: 1px solid var(--hairline); border-bottom: 1px solid var(--hairline);
+.oi-type-seg { display: flex; }
+.oi-type-seg button { flex: 1; }
+.oi-inline { display: flex; gap: 8px; align-items: stretch; }
+.oi-inline .calc-input { flex: 1; min-width: 0; }
+.oi-optional { margin: 4px 0 6px; border-top: 1px solid var(--hairline); padding-top: 12px; }
+.oi-optional > summary {
+  cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 7px;
+  font-size: 12.5px; font-weight: 650; color: var(--text-secondary); margin-bottom: 12px;
 }
-table.opt-chain tr.opt-price-row .opt-price-ticker { color: var(--text-muted); font-weight: 700; margin-right: 10px; }
-table.opt-chain tr.opt-price-row .opt-price-val { margin-right: 8px; }
+.oi-optional > summary::-webkit-details-marker { display: none; }
+.oi-optional > summary::before { content: "+"; color: var(--gold); font-weight: 700; width: 10px; }
+.oi-optional[open] > summary::before { content: "−"; }
+.oi-form-error { color: #ff9d9d; font-size: 12.5px; margin: 4px 0 8px; }
+
+.oi-banner {
+  display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap;
+  margin: 14px 0 0; padding: 11px 14px; border-radius: var(--r-sm);
+  font-size: 12.5px; line-height: 1.5; color: var(--text-secondary);
+  background: rgba(255,217,102,.06); border: 1px solid rgba(255,217,102,.28);
+}
+.oi-banner.danger { background: rgba(212,50,50,.08); border-color: rgba(212,50,50,.4); }
+.oi-banner strong { color: var(--text-primary); }
+.oi-banner .btn { min-height: 0; padding: 5px 11px; font-size: 12px; margin-left: auto; }
+
+.oi-kpis { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.oi-kpis .kpi-value { font-size: 21px; }
+.kpi-value.oi-neg { color: #ff8f8f; }
+.kpi-value.oi-pos { color: #35c294; }
+
+/* Slider rows (Future IV, simulator) */
+.oi-slider-row { display: grid; gap: 6px 14px; grid-template-columns: 150px minmax(0, 1fr) auto; align-items: center; }
+.oi-slider-row + .oi-slider-row { margin-top: 12px; }
+.oi-slider-label { font-size: 10.5px; font-weight: 650; letter-spacing: .1em; text-transform: uppercase; color: var(--text-muted); }
+.oi-slider-value { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; min-width: 92px; text-align: right; }
+.oi-range {
+  -webkit-appearance: none; appearance: none; width: 100%; height: 26px; background: transparent; cursor: pointer;
+}
+.oi-range::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: var(--axis); }
+.oi-range::-moz-range-track { height: 4px; border-radius: 2px; background: var(--axis); }
+.oi-range::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 18px; height: 18px; margin-top: -7px; border-radius: 50%;
+  background: var(--gold); border: 3px solid var(--surface-1); box-shadow: 0 0 0 1px var(--gold-dim);
+}
+.oi-range::-moz-range-thumb {
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--gold); border: 3px solid var(--surface-1); box-shadow: 0 0 0 1px var(--gold-dim);
+}
+.oi-range:focus-visible { outline: 2px solid var(--gold-dim); outline-offset: 2px; border-radius: 6px; }
+.oi-note { font-size: 12px; color: var(--text-muted); margin-top: 10px; line-height: 1.5; }
+
+.oi-card-tools { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-left: auto; }
+.oi-seg-small button { padding: 5px 11px; font-size: 12px; }
+
+.oi-chips { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; padding: 0 18px 12px; }
+.oi-chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 4px 6px 4px 10px; border-radius: 999px;
+  background: var(--surface-2); border: 1px solid var(--hairline);
+  font-size: 12.5px; font-weight: 650; font-variant-numeric: tabular-nums;
+}
+.oi-chip .swatch { width: 14px; height: 3px; border-radius: 2px; }
+.oi-chip button {
+  width: 20px; height: 20px; border-radius: 50%; border: 0; padding: 0;
+  background: transparent; color: var(--text-muted); cursor: pointer; font-size: 14px; line-height: 1;
+}
+.oi-chip-add { display: inline-flex; gap: 6px; }
+.oi-chip-add input { width: 88px; padding: 5px 9px; font-size: 12.5px; }
+
+.oi-time-layout { display: grid; gap: 0; grid-template-columns: minmax(0, 1fr) 300px; }
+.oi-time-layout > * { min-width: 0; }
+.oi-sim { padding: 6px 18px 18px; border-left: 1px solid var(--hairline); }
+.oi-sim .oi-slider-row { grid-template-columns: minmax(0, 1fr) auto; }
+.oi-sim .oi-slider-row .oi-range { grid-column: 1 / -1; }
+.oi-sim-out { margin-top: 16px; display: grid; gap: 2px; }
+.oi-sim-out .row { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--hairline); font-size: 13px; }
+.oi-sim-out .row:last-child { border-bottom: 0; }
+.oi-sim-out .k { color: var(--text-secondary); }
+.oi-sim-out .v { font-weight: 700; font-variant-numeric: tabular-nums; }
+.oi-sim-out .v.big { font-size: 20px; }
+.oi-pos { color: #35c294; }
+.oi-neg { color: #ff8f8f; }
+
+.oi-chart { display: block; width: 100%; height: auto; touch-action: pan-y; }
+.oi-chart:focus-visible { outline: 2px solid var(--gold-dim); outline-offset: 3px; border-radius: 8px; }
+.oi-chart:focus:not(:focus-visible) { outline: none; }
+@media (max-width: 760px) { .oi-chart { min-width: 660px; } }
+#oiTimeTip .name, #oiDecayTip .name, #oiPnlTip .name { white-space: nowrap; }
+@media (max-width: 760px) {
+  #oiTimeTip, #oiDecayTip, #oiPnlTip { min-width: 0; padding: 7px 10px; font-size: 11px; background: rgba(10,10,12,.82); }
+  #oiTimeTip .tt-year, #oiDecayTip .tt-year, #oiPnlTip .tt-year { font-size: 10px; padding-bottom: 4px; margin-bottom: 4px; }
+  #oiTimeTip .tt-row, #oiDecayTip .tt-row, #oiPnlTip .tt-row { padding: 1px 0; gap: 10px; }
+}
+
+table.summary.oi-table td.oi-neg { color: #ff8f8f; }
+table.summary.oi-table td.oi-pos { color: #35c294; }
+table.summary.oi-table tbody th {
+  position: sticky; left: 0; z-index: 1;
+  background: linear-gradient(rgba(255,255,255,.02), rgba(255,255,255,.02)), var(--surface-1);
+}
+table.summary.oi-table tr.oi-row-hl td, table.summary.oi-table tr.oi-row-hl th { background-color: rgba(255,217,102,.06); }
+
+.oi-cards3 { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.oi-scn .calc-card-head { display: flex; align-items: center; gap: 8px; }
+.oi-scn .swatch { width: 10px; height: 10px; border-radius: 3px; }
+
+.oi-greek { display: grid; gap: 4px; }
+.oi-greek .g-val { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.oi-greek .g-src { font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); }
+.oi-greek p { margin: 6px 0 0; font-size: 12.5px; line-height: 1.55; color: var(--text-secondary); }
+
+.oi-insights { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.oi-insight h4 { margin: 0 0 8px; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-muted); }
+.oi-insight p { margin: 0; font-size: 13px; line-height: 1.6; color: var(--text-secondary); }
+.oi-insight p strong { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.oi-insight table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 4px; }
+.oi-insight td { padding: 5px 0; border-bottom: 1px solid var(--hairline); font-variant-numeric: tabular-nums; }
+.oi-insight td:last-child { text-align: right; font-weight: 700; }
+
+.oi-cats { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+.oi-cat { padding: 12px 14px; border-radius: var(--r-sm); background: var(--surface-2); border: 1px solid var(--hairline); }
+.oi-cat .k { font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-muted); }
+.oi-cat .v { margin-top: 6px; font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 7px; }
+.oi-cat .v .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.oi-cat.tone-good .dot { background: #35c294; }
+.oi-cat.tone-mid .dot { background: var(--gold); }
+.oi-cat.tone-bad .dot { background: #ff8f8f; }
+.oi-cat .why { margin-top: 4px; font-size: 11.5px; color: var(--text-muted); line-height: 1.45; }
+.oi-summary { margin: 16px 0 0; font-size: 14px; line-height: 1.65; color: var(--text-secondary); }
+
+@media (max-width: 900px) {
+  .oi-time-layout { grid-template-columns: minmax(0, 1fr); }
+  .oi-sim { border-left: 0; border-top: 1px solid var(--hairline); padding-top: 14px; }
+}
+@media (max-width: 560px) {
+  .oi-slider-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .oi-slider-row .oi-range { grid-column: 1 / -1; order: 3; }
+  .oi-card-tools { margin-left: 0; width: 100%; }
+}
+@media (pointer: coarse) {
+  .oi-range { height: 40px; }
+  .oi-range::-webkit-slider-thumb { width: 26px; height: 26px; margin-top: -11px; }
+  .oi-range::-moz-range-thumb { width: 22px; height: 22px; }
+  .oi-chip button { width: 30px; height: 30px; }
+}
 .donut-card-body {
   display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
   padding: 18px;
@@ -1447,10 +1571,10 @@ footer.legal code {
           </svg>
         </button>
         <button class="product-item" role="menuitem" data-view="options">
-          <span class="pm-mark" style="background:linear-gradient(145deg,#d98fe0,#8a3fa0);color:#1c0d20">OP</span>
+          <span class="pm-mark" style="background:linear-gradient(145deg,#d98fe0,#8a3fa0);color:#1c0d20">OI</span>
           <span>
-            <span class="pm-name">Options Watchlist</span>
-            <span class="pm-sub">Search chains, track contracts, chart performance</span>
+            <span class="pm-name">Option Insight</span>
+            <span class="pm-sub">Value, return and time decay of an option you enter</span>
           </span>
           <svg class="pm-check" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path d="M3 8.5 6.5 12 13 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
@@ -2140,71 +2264,235 @@ footer.legal code {
   </div>
 </div>
 
-<!-- ── Options Watchlist ─────────────────────────────────────────────────── -->
+<!-- ── Option Insight ────────────────────────────────────────────────────────
+     Manual entry only — nothing about the contract is fetched. Every number
+     on this view is computed in the browser by OptionMath (see the script). -->
 <div id="viewOptions" hidden>
   <div class="section-head">
-    <h2>Options Watchlist</h2>
-    <span class="hint">Search a ticker's option chain, add contracts to track, and chart their performance</span>
+    <h2>Enter Option</h2>
+    <span class="hint">Type in the contract you're looking at — every number below is calculated from these inputs</span>
     <span class="rule"></span>
   </div>
-
   <div class="card">
-    <div class="card-head"><h3>Search Options</h3></div>
     <div class="card-body">
-      <form id="optionsSearchForm" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
-        <div class="calc-field" style="margin-bottom:0;flex:1;min-width:160px">
-          <label for="optionsSearchInput">Ticker</label>
-          <input id="optionsSearchInput" class="calc-input" type="text" maxlength="10"
-            autocomplete="off" spellcheck="false" placeholder="e.g., AAPL" style="text-transform:uppercase">
+      <form id="oiForm" novalidate autocomplete="off">
+        <div class="oi-grid">
+          <div class="calc-field">
+            <label for="oiF_ticker">Ticker / name<span class="oi-req">*</span></label>
+            <input id="oiF_ticker" class="calc-input" type="text" maxlength="24" spellcheck="false" placeholder="e.g., AAPL">
+          </div>
+          <div class="calc-field">
+            <label for="oiF_S">Stock price ($)<span class="oi-req">*</span></label>
+            <div class="oi-inline">
+              <input id="oiF_S" class="calc-input" type="text" inputmode="decimal" placeholder="150.00">
+              <button type="button" id="oiLive" class="btn btn-ghost" title="Fill in the latest stock price for this ticker" hidden>Live</button>
+            </div>
+          </div>
+          <div class="calc-field">
+            <label id="oiTypeLabel">Option type<span class="oi-req">*</span></label>
+            <div class="seg oi-type-seg" id="oiType" role="group" aria-labelledby="oiTypeLabel">
+              <button type="button" data-type="call" aria-pressed="true">Call</button>
+              <button type="button" data-type="put" aria-pressed="false">Put</button>
+            </div>
+          </div>
+          <div class="calc-field">
+            <label for="oiF_K">Strike ($)<span class="oi-req">*</span></label>
+            <input id="oiF_K" class="calc-input" type="text" inputmode="decimal" placeholder="170.00">
+          </div>
+          <div class="calc-field">
+            <label for="oiF_premium">Premium / share ($)<span class="oi-req">*</span></label>
+            <input id="oiF_premium" class="calc-input" type="text" inputmode="decimal" placeholder="11.50">
+          </div>
+          <div class="calc-field">
+            <label for="oiF_exp">Expiration<span class="oi-req">*</span></label>
+            <input id="oiF_exp" class="calc-input" type="date">
+          </div>
+          <div class="calc-field">
+            <label for="oiF_iv">Current IV (%)<span class="oi-req">*</span></label>
+            <input id="oiF_iv" class="calc-input" type="text" inputmode="decimal" placeholder="55">
+          </div>
         </div>
-        <button type="submit" class="btn btn-primary" style="padding:9px 18px">Search</button>
+
+        <details class="oi-optional" id="oiOptional">
+          <summary>Optional details — Greeks, liquidity, rates</summary>
+          <div class="oi-grid">
+            <div class="calc-field"><label for="oiF_delta">Delta</label><input id="oiF_delta" class="calc-input" type="text" inputmode="decimal" placeholder="estimated"></div>
+            <div class="calc-field"><label for="oiF_gamma">Gamma</label><input id="oiF_gamma" class="calc-input" type="text" inputmode="decimal" placeholder="estimated"></div>
+            <div class="calc-field"><label for="oiF_theta">Theta / day</label><input id="oiF_theta" class="calc-input" type="text" inputmode="decimal" placeholder="estimated"></div>
+            <div class="calc-field"><label for="oiF_vega">Vega</label><input id="oiF_vega" class="calc-input" type="text" inputmode="decimal" placeholder="estimated"></div>
+            <div class="calc-field"><label for="oiF_bid">Bid ($)</label><input id="oiF_bid" class="calc-input" type="text" inputmode="decimal" placeholder="—"></div>
+            <div class="calc-field"><label for="oiF_ask">Ask ($)</label><input id="oiF_ask" class="calc-input" type="text" inputmode="decimal" placeholder="—"></div>
+            <div class="calc-field"><label for="oiF_oi">Open interest</label><input id="oiF_oi" class="calc-input" type="text" inputmode="numeric" placeholder="—"></div>
+            <div class="calc-field"><label for="oiF_volume">Volume</label><input id="oiF_volume" class="calc-input" type="text" inputmode="numeric" placeholder="—"></div>
+            <div class="calc-field"><label for="oiF_r">Risk-free rate (%)</label><input id="oiF_r" class="calc-input" type="text" inputmode="decimal" placeholder="4.0"></div>
+            <div class="calc-field"><label for="oiF_q">Dividend yield (%)</label><input id="oiF_q" class="calc-input" type="text" inputmode="decimal" placeholder="0.0"></div>
+          </div>
+          <div class="calc-hint" style="margin:-4px 0 6px">Greeks are per share, as your broker shows them. Any you leave blank are estimated.</div>
+        </details>
+
+        <div class="oi-subhead">MY STOCK THESIS</div>
+        <div class="oi-grid">
+          <div class="calc-field"><label for="oiF_bear">Bear price ($)</label><input id="oiF_bear" class="calc-input" type="text" inputmode="decimal" placeholder="135"></div>
+          <div class="calc-field"><label for="oiF_base">Base price ($)</label><input id="oiF_base" class="calc-input" type="text" inputmode="decimal" placeholder="190"></div>
+          <div class="calc-field"><label for="oiF_bull">Bull price ($)</label><input id="oiF_bull" class="calc-input" type="text" inputmode="decimal" placeholder="230"></div>
+          <div class="calc-field"><label for="oiF_target">Target date</label><input id="oiF_target" class="calc-input" type="date"></div>
+        </div>
+
+        <div id="oiFormError" class="oi-form-error" role="alert" hidden></div>
+        <div class="calc-actions" style="max-width:560px">
+          <button type="submit" class="btn btn-primary">Analyze</button>
+          <button type="button" id="oiExample" class="btn btn-ghost">Load example</button>
+          <button type="button" id="oiReset" class="btn btn-ghost">Clear</button>
+        </div>
       </form>
+    </div>
+  </div>
 
-      <div id="optionsExpRow" class="watchlist-range-row" role="tablist" aria-label="Expiration date" style="margin-top:16px" hidden></div>
-      <div id="optionsChainStatus" class="watchlist-chart-status"></div>
+  <div id="oiResults" hidden>
+    <div class="section-head">
+      <h2 id="oiTitle">Contract Overview</h2>
+      <span class="rule"></span>
+    </div>
+    <div class="kpi-grid oi-kpis" id="oiOverview"></div>
+    <div id="oiBanners"></div>
 
-      <div id="optionsChainGrid" hidden>
-        <div class="table-scroll">
-          <table class="summary opt-chain" id="optionsChainTable">
-            <thead>
-              <tr>
-                <th colspan="8" class="opt-side-head opt-side-call">Calls</th>
-                <th class="opt-strike-head">Strike</th>
-                <th colspan="8" class="opt-side-head opt-side-put">Puts</th>
-              </tr>
-              <tr>
-                <th></th><th>Vol</th><th>Bid</th><th>Ask</th><th>Last</th><th>Mid</th><th>IV</th><th>OI</th>
-                <th></th>
-                <th>Bid</th><th>Ask</th><th>Last</th><th>Mid</th><th>IV</th><th>OI</th><th>Vol</th><th></th>
-              </tr>
-            </thead>
-            <tbody id="optionsChainBody"></tbody>
-          </table>
+    <div class="section-head">
+      <h2>Future IV</h2>
+      <span class="hint">Applies to every projection below — drag it down to see an IV crush</span>
+      <span class="rule"></span>
+    </div>
+    <div class="card">
+      <div class="card-body">
+        <div class="oi-slider-row">
+          <label class="oi-slider-label" for="oiIv">Future IV</label>
+          <input id="oiIv" class="oi-range" type="range" min="5" max="200" step="0.5">
+          <span class="oi-slider-value" id="oiIvVal">—</span>
+        </div>
+        <div class="oi-note" id="oiIvReadout"></div>
+      </div>
+    </div>
+
+    <div class="section-head">
+      <h2>Option Performance Over Time</h2>
+      <span class="hint">Each line assumes the stock sits at that price from today on</span>
+      <span class="rule"></span>
+      <div class="seg oi-seg-small" id="oiYSeg" role="group" aria-label="Chart measure">
+        <button type="button" data-y="value" aria-pressed="true">Option value</button>
+        <button type="button" data-y="pnl" aria-pressed="false">P&amp;L $</button>
+        <button type="button" data-y="ret" aria-pressed="false">Return %</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="oi-time-layout">
+        <div>
+          <div class="chart-wrap">
+            <svg id="oiTimeChart" class="oi-chart" viewBox="0 0 920 360" role="img" tabindex="0" aria-labelledby="oiTimeChartTitle">
+              <title id="oiTimeChartTitle">Option value over time at several assumed stock prices</title>
+            </svg>
+            <div id="oiTimeTip" class="tooltip" role="status" aria-live="polite"></div>
+          </div>
+          <div class="oi-chips" id="oiPriceChips"></div>
+        </div>
+        <aside class="oi-sim" aria-labelledby="oiSimHead">
+          <div class="card-head" style="padding:10px 0 12px;border:0"><h3 id="oiSimHead">Price + Date Simulator</h3></div>
+          <div class="oi-slider-row">
+            <label class="oi-slider-label" for="oiSimPrice">Stock price</label>
+            <input id="oiSimPriceNum" class="calc-input" type="text" inputmode="decimal" aria-label="Stock price" style="width:104px;font-size:14px;padding:6px 9px">
+            <input id="oiSimPrice" class="oi-range" type="range">
+          </div>
+          <div class="oi-slider-row">
+            <label class="oi-slider-label" for="oiSimDay">Date</label>
+            <span class="oi-slider-value" id="oiSimDayVal">—</span>
+            <input id="oiSimDay" class="oi-range" type="range" min="0" step="1">
+          </div>
+          <div class="oi-sim-out" id="oiSimOut" aria-live="polite"></div>
+        </aside>
+      </div>
+    </div>
+
+    <div class="section-head">
+      <h2>Performance Curve</h2>
+      <span class="hint" id="oiPerfHint">Same measure as the chart toggle above</span>
+      <span class="rule"></span>
+    </div>
+    <div class="card">
+      <div class="table-scroll"><table class="summary oi-table" id="oiPerfTable"></table></div>
+    </div>
+
+    <div class="section-head">
+      <h2>Time Decay</h2>
+      <span class="hint">Stock price and IV held where they are today</span>
+      <span class="rule"></span>
+    </div>
+    <div class="card">
+      <div class="chart-wrap">
+        <svg id="oiDecayChart" class="oi-chart" viewBox="0 0 920 260" role="img" tabindex="0" aria-labelledby="oiDecayChartTitle">
+          <title id="oiDecayChartTitle">Option value from today to expiration if nothing else changes</title>
+        </svg>
+        <div id="oiDecayTip" class="tooltip" role="status" aria-live="polite"></div>
+      </div>
+      <div class="table-scroll"><table class="summary oi-table" id="oiDecayTable"></table></div>
+    </div>
+
+    <div class="section-head">
+      <h2>Profit / Loss by Stock Price</h2>
+      <span class="rule"></span>
+      <div class="oi-card-tools">
+        <div class="seg oi-seg-small" id="oiPnlDateSeg" role="group" aria-label="Valuation date">
+          <button type="button" data-d="today" aria-pressed="false">Today</button>
+          <button type="button" data-d="sim" aria-pressed="true">Simulator date</button>
+          <button type="button" data-d="target" aria-pressed="false">Target</button>
+          <button type="button" data-d="exp" aria-pressed="false">Expiration</button>
+        </div>
+        <input id="oiPnlCustom" class="calc-input" type="date" aria-label="Custom valuation date" style="width:auto;font-size:13px;padding:5px 9px">
+        <div class="seg oi-seg-small" id="oiPnlYSeg" role="group" aria-label="Measure">
+          <button type="button" data-y="pnl" aria-pressed="true">$ Profit</button>
+          <button type="button" data-y="ret" aria-pressed="false">% Return</button>
         </div>
       </div>
     </div>
-  </div>
-
-  <div class="section-head">
-    <h2>Tracked Contracts</h2>
-    <span class="hint">Live price and today's change — click a row to open its price chart</span>
-    <span class="rule"></span>
-  </div>
-  <div class="card">
-    <div class="card-body" style="padding:4px 6px 6px">
-      <div id="optionsWatchlistEmpty" style="padding:32px;text-align:center;color:var(--text-muted)">
-        <p style="margin:0;font-size:14px">No contracts tracked yet — search a ticker above and add one.</p>
+    <div class="card">
+      <div class="chart-wrap">
+        <svg id="oiPnlChart" class="oi-chart" viewBox="0 0 920 340" role="img" tabindex="0" aria-labelledby="oiPnlChartTitle">
+          <title id="oiPnlChartTitle">Profit or loss across stock prices on the selected date</title>
+        </svg>
+        <div id="oiPnlTip" class="tooltip" role="status" aria-live="polite"></div>
       </div>
-      <div class="table-scroll" id="optionsWatchlistTableWrap" hidden>
-        <table class="summary" id="optionsWatchlistTable">
-          <thead><tr>
-            <th style="text-align:left">Contract</th><th style="text-align:left">Expires</th>
-            <th>Price</th><th style="width:24px"></th>
-          </tr></thead>
-          <tbody id="optionsWatchlistBody"></tbody>
-        </table>
+      <div class="chart-legend" id="oiPnlLegend"></div>
+    </div>
+
+    <div class="section-head">
+      <h2>My Stock Thesis</h2>
+      <span class="hint" id="oiThesisHint"></span>
+      <span class="rule"></span>
+    </div>
+    <div class="oi-cards3" id="oiThesis"></div>
+
+    <div class="section-head">
+      <h2>Greeks</h2>
+      <span class="hint">Per contract (100 shares). They change constantly with price, time and IV — this is today's snapshot.</span>
+      <span class="rule"></span>
+    </div>
+    <div class="oi-cards3" id="oiGreeks"></div>
+
+    <div class="section-head">
+      <h2>Key Insights</h2>
+      <span class="rule"></span>
+    </div>
+    <div class="oi-insights" id="oiInsights"></div>
+
+    <div class="section-head">
+      <h2>General Insight</h2>
+      <span class="hint">Built only from the numbers above — not a recommendation</span>
+      <span class="rule"></span>
+    </div>
+    <div class="card">
+      <div class="card-body">
+        <div class="oi-cats" id="oiCats"></div>
+        <p class="oi-summary" id="oiSummary"></p>
       </div>
     </div>
+    <p class="oi-note">Estimates use the Black–Scholes–Merton model (European exercise, constant rate and dividend yield) and are floored at intrinsic value; at expiration the option is worth exactly its intrinsic value. Real prices also move with bid/ask spreads, skew and early-exercise effects. Not financial advice.</p>
   </div>
 </div>
 
@@ -2646,8 +2934,8 @@ function clearWatchlistPeChart() {
 }
 
 async function loadWatchlistPeHistory() {
-  const symbol = watchlistChartTicker, range = watchlistChartRange, mode = watchlistChartMode;
-  if (mode !== "stock" || !symbol) { clearWatchlistPeChart(); return; }
+  const symbol = watchlistChartTicker, range = watchlistChartRange;
+  if (!symbol) { clearWatchlistPeChart(); return; }
   const statusEl = document.getElementById("watchlistPeStatus");
   if (statusEl) { statusEl.textContent = "Loading trailing P/E…"; statusEl.className = "watchlist-chart-status"; }
   try {
@@ -2655,12 +2943,12 @@ async function loadWatchlistPeHistory() {
       + "&range=" + encodeURIComponent(range));
     const j = await res.json();
     if (!res.ok || j.error) throw new Error(j.error || ("HTTP " + res.status));
-    if (symbol !== watchlistChartTicker || range !== watchlistChartRange || mode !== watchlistChartMode) return;
+    if (symbol !== watchlistChartTicker || range !== watchlistChartRange) return;
     watchlistPeHistory = j.points || [];
     renderPeChart("watchlistPeChart", watchlistPeHistory, watchlistPeShowAverage);
     if (statusEl) { statusEl.textContent = ""; statusEl.className = "watchlist-chart-status"; }
   } catch (e) {
-    if (symbol !== watchlistChartTicker || range !== watchlistChartRange || mode !== watchlistChartMode) return;
+    if (symbol !== watchlistChartTicker || range !== watchlistChartRange) return;
     watchlistPeHistory = null;
     clearPeSvg("watchlistPeChart");
     if (statusEl) {
@@ -4446,7 +4734,7 @@ document.getElementById("watchlistSearchForm").addEventListener("submit", (ev) =
   input.blur();
 });
 document.getElementById("btnWatchlistModalAdd").addEventListener("click", async () => {
-  if (!watchlistChartTicker || watchlistChartMode !== "stock") return;
+  if (!watchlistChartTicker) return;
   await addWatchlistTicker(watchlistChartTicker);
   document.getElementById("btnWatchlistModalAdd").hidden = watchlistTickers.includes(watchlistChartTicker);
 });
@@ -4477,312 +4765,1168 @@ watchlistAddInput.addEventListener("blur", () => {
   setTimeout(() => { if (!watchlistAddForm.hidden) closeWatchlistAddForm(); }, 150);
 });
 
-/* ── Options Watchlist: search a ticker's chain, track specific contracts ─── */
-let optionsTicker = null;
-let optionsExpirations = [];
-let optionsExpiration = null;
-let optionsChain = null;      // { calls: [...], puts: [...] } | null
-let optionsUnderlyingQuote = null;   // {price, change, changePct} for the searched ticker | null
-let optionsContracts = [];    // [{contractSymbol, ticker, expiration, type, strike}]
-let optionsQuoteMap = {};     // contractSymbol -> quote (same shape as watchlistQuoteMap)
-let optionsTimer = null;
+/* ── OptionMath:start ──────────────────────────────────────────────────────
+   Every number on the Option Insight page comes from here — pure functions,
+   no DOM, no network.
+   Model: Black–Scholes–Merton (European, continuous dividend yield) before
+   expiration, intrinsic value at expiration. Time runs in whole calendar days
+   from today, T = days remaining / 365. */
+const OptionMath = (() => {
+  const MULT = 100;          // shares per contract
+  const DAY_MS = 86400000;
 
-function optionsContractSet() {
-  return new Set(optionsContracts.map(c => c.contractSymbol));
-}
-
-async function searchOptions(rawTicker) {
-  const ticker = (rawTicker || "").trim().toUpperCase();
-  if (!ticker) return;
-  optionsTicker = ticker;
-  optionsExpiration = null;
-  optionsChain = null;
-  optionsExpirations = [];
-  optionsUnderlyingQuote = null;
-  document.getElementById("optionsChainGrid").hidden = true;
-  const expRow = document.getElementById("optionsExpRow");
-  expRow.hidden = true;
-  expRow.innerHTML = "";
-  const statusEl = document.getElementById("optionsChainStatus");
-  statusEl.textContent = "Loading expirations…";
-  statusEl.className = "watchlist-chart-status";
-  fetchOptionsUnderlyingQuote(ticker);   // fire-and-forget — the chain still renders without it
-  try {
-    const res = await fetch(BRIDGE + "/api/options/expirations?ticker=" + encodeURIComponent(ticker));
-    const j = await res.json();
-    if (!res.ok || j.error) throw new Error(j.error || ("HTTP " + res.status));
-    if (ticker !== optionsTicker) return;   // superseded by a newer search
-    optionsExpirations = j.expirations || [];
-    if (!optionsExpirations.length) throw new Error("No options found for this ticker.");
-    statusEl.textContent = "";
-    await selectOptionsExpiration(optionsExpirations[0]);
-  } catch (e) {
-    if (ticker !== optionsTicker) return;
-    statusEl.textContent = "Couldn't load options — " + String(e.message || e);
-    statusEl.className = "watchlist-chart-status err";
-  }
-}
-
-// Fetches the underlying's live quote for the price-divider row — reuses
-// the existing generic watchlist quote endpoint, which never required the
-// ticker to already be on the saved watchlist. Fire-and-forget from
-// searchOptions(): the chain itself doesn't wait on this, and re-renders
-// (adding/repositioning the divider row) whenever it resolves.
-async function fetchOptionsUnderlyingQuote(ticker) {
-  try {
-    const res = await fetch(BRIDGE + "/api/watchlist?tickers=" + encodeURIComponent(ticker));
-    const j = await res.json();
-    if (!res.ok) throw new Error(j.error || ("HTTP " + res.status));
-    if (ticker !== optionsTicker) return;   // superseded by a newer search
-    const q = (j.quotes || [])[0];
-    optionsUnderlyingQuote = (q && !q.error && q.price != null) ? q : null;
-    renderOptionsChain();
-  } catch {
-    if (ticker === optionsTicker) optionsUnderlyingQuote = null;
-  }
-}
-
-function renderOptionsExpirations() {
-  const row = document.getElementById("optionsExpRow");
-  row.innerHTML = optionsExpirations.map(exp => `
-    <button type="button" class="wl-range-btn${exp === optionsExpiration ? " is-active" : ""}"
-      data-exp="${exp}" role="tab" aria-selected="${exp === optionsExpiration}">${exp}</button>
-  `).join("");
-  row.hidden = false;
-}
-
-async function selectOptionsExpiration(exp) {
-  optionsExpiration = exp;
-  renderOptionsExpirations();
-  const statusEl = document.getElementById("optionsChainStatus");
-  const grid = document.getElementById("optionsChainGrid");
-  statusEl.textContent = "Loading chain…";
-  statusEl.className = "watchlist-chart-status";
-  grid.hidden = true;
-  const ticker = optionsTicker;
-  try {
-    const url = BRIDGE + "/api/options/chain?ticker=" + encodeURIComponent(ticker)
-      + "&expiration=" + encodeURIComponent(exp);
-    const res = await fetch(url);
-    const j = await res.json();
-    if (!res.ok || j.error) throw new Error(j.error || ("HTTP " + res.status));
-    if (ticker !== optionsTicker || exp !== optionsExpiration) return;   // superseded
-    optionsChain = { calls: j.calls || [], puts: j.puts || [] };
-    renderOptionsChain();
-    statusEl.textContent = "";
-  } catch (e) {
-    if (ticker !== optionsTicker || exp !== optionsExpiration) return;
-    statusEl.textContent = "Couldn't load the chain — " + String(e.message || e);
-    statusEl.className = "watchlist-chart-status err";
-  }
-}
-
-// Groups calls/puts by strike into one row per strike — a strike missing
-// on one side just renders blank cells there instead of a missing row,
-// matching a real chain where calls and puts don't always list identical
-// strikes.
-function buildStrikeRows(chain) {
-  const byStrike = new Map();
-  const put = (arr, key) => (arr || []).forEach(r => {
-    if (!byStrike.has(r.strike)) byStrike.set(r.strike, { strike: r.strike, call: null, put: null });
-    byStrike.get(r.strike)[key] = r;
-  });
-  put(chain.calls, "call");
-  put(chain.puts, "put");
-  return [...byStrike.values()].sort((a, b) => a.strike - b.strike);
-}
-
-// Renders the 8-cell block for one side of one strike row. Column order is
-// Bid/Ask/Last/Mid/IV/OI (kept adjacent to the shared Strike column on both
-// sides), with our two extra columns (Vol, Add) pushed to the outer edge —
-// Add,Vol first for calls, Vol,Add last for puts.
-function optionSideCells(row, type, currentPrice) {
-  if (!row) return "<td></td>".repeat(8);
-
-  const tracked = optionsContractSet().has(row.contractSymbol);
-  const cell = (v, fmt) => v == null ? EMDASH : fmt(v);
-  const money = v => cell(v, x => "$" + x.toFixed(2));
-  const mid = (row.bid != null && row.ask != null) ? (row.bid + row.ask) / 2 : null;
-  const iv = row.impliedVolatility != null ? (row.impliedVolatility * 100).toFixed(1) + "%" : EMDASH;
-  const itm = currentPrice != null
-    ? (type === "call" ? row.strike < currentPrice : row.strike > currentPrice)
-    : !!row.inTheMoney;
-  const itmCls = itm ? " opt-itm" : "";
-
-  const priceCells = `
-    <td class="opt-bid${itmCls}">${money(row.bid)}</td>
-    <td class="opt-ask${itmCls}">${money(row.ask)}</td>
-    <td class="${itm ? "opt-itm" : ""}">${money(row.lastPrice)}</td>
-    <td class="${itm ? "opt-itm" : ""}">${money(mid)}</td>
-    <td class="${itm ? "opt-itm" : ""}">${iv}</td>
-    <td class="${itm ? "opt-itm" : ""}">${cell(row.openInterest, v => v.toLocaleString())}</td>`;
-  const volCell = `<td class="${itm ? "opt-itm" : ""}">${cell(row.volume, v => v.toLocaleString())}</td>`;
-  const addCell = `<td><button type="button" class="fill-btn" data-add-contract="${row.contractSymbol}" data-type="${type}"
-    ${tracked ? "disabled" : ""}>${tracked ? "Added" : "+ Add"}</button></td>`;
-
-  return type === "call" ? (addCell + volCell + priceCells) : (priceCells + volCell + addCell);
-}
-
-function optionsPriceRowHtml() {
-  const q = optionsUnderlyingQuote;
-  if (!q) return "";
-  const dir = q.changePct > 0 ? "up" : q.changePct < 0 ? "down" : "flat";
-  const sign = q.changePct > 0 ? "+" : "";
-  return `<tr class="opt-price-row"><td colspan="17">
-    <span class="opt-price-ticker">${optionsTicker}</span>
-    <span class="opt-price-val">$${q.price.toFixed(2)}</span>
-    <span class="wl-change ${dir}">${sign}${q.change.toFixed(2)} (${sign}${q.changePct.toFixed(2)}%)</span>
-  </td></tr>`;
-}
-
-function renderOptionsChain() {
-  if (!optionsChain) return;
-  const grid = document.getElementById("optionsChainGrid");
-  const rows = buildStrikeRows(optionsChain);
-
-  if (!rows.length) {
-    document.getElementById("optionsChainBody").innerHTML =
-      `<tr><td colspan="17" style="color:var(--text-muted);text-align:center;padding:24px">No options found for this expiration.</td></tr>`;
-    grid.hidden = false;
-    return;
-  }
-
-  const price = optionsUnderlyingQuote ? optionsUnderlyingQuote.price : null;
-  let dividerPlaced = price == null;   // no live price -> never insert a divider row
-  const html = [];
-  for (const r of rows) {
-    if (!dividerPlaced && r.strike >= price) {
-      html.push(optionsPriceRowHtml());
-      dividerPlaced = true;
+  // Cumulative standard normal — Hart's double-precision algorithm (as given
+  // by West, 2005); accurate to ~1e-15, unlike the 1e-7 A&S approximation,
+  // so finite-difference Greeks and the IV solve stay consistent.
+  function normCdf(x) {
+    const a = Math.abs(x);
+    let c;
+    if (a > 37) c = 0;
+    else {
+      const e = Math.exp(-a * a / 2);
+      if (a < 7.07106781186547) {
+        let b = 3.52624965998911e-2 * a + 0.700383064443688;
+        b = b * a + 6.37396220353165; b = b * a + 33.912866078383;
+        b = b * a + 112.079291497871; b = b * a + 221.213596169931;
+        b = b * a + 220.206867912376;
+        c = e * b;
+        b = 8.83883476483184e-2 * a + 1.75566716318264;
+        b = b * a + 16.064177579207; b = b * a + 86.7807322029461;
+        b = b * a + 296.564248779674; b = b * a + 637.333633378831;
+        b = b * a + 793.826512519948; b = b * a + 440.413735824752;
+        c = c / b;
+      } else {
+        let b = a + 0.65;
+        b = a + 4 / b; b = a + 3 / b; b = a + 2 / b; b = a + 1 / b;
+        c = e / b / 2.506628274631;
+      }
     }
-    html.push(`<tr>
-      ${optionSideCells(r.call, "call", price)}
-      <td class="opt-strike">$${r.strike.toFixed(2)}</td>
-      ${optionSideCells(r.put, "put", price)}
-    </tr>`);
+    return x > 0 ? 1 - c : c;
   }
-  if (!dividerPlaced) html.push(optionsPriceRowHtml());   // price above every listed strike
+  const normPdf = (x) => Math.exp(-x * x / 2) / Math.sqrt(2 * Math.PI);
 
-  document.getElementById("optionsChainBody").innerHTML = html.join("");
-  grid.hidden = false;
+  const intrinsic = (S, K, type) => type === "put" ? Math.max(K - S, 0) : Math.max(S - K, 0);
+
+  // Black–Scholes–Merton. At T<=0 (or a degenerate sigma) this is the
+  // payoff at expiration / the discounted-forward value.
+  function bsm(S, K, T, r, q, sigma, type) {
+    if (!(S > 0) || !(K > 0)) return 0;
+    if (T <= 0) return intrinsic(S, K, type);
+    if (!(sigma > 0)) {
+      const fwd = S * Math.exp(-q * T) - K * Math.exp(-r * T);
+      return type === "put" ? Math.max(-fwd, 0) : Math.max(fwd, 0);
+    }
+    const sqT = Math.sqrt(T);
+    const d1 = (Math.log(S / K) + (r - q + sigma * sigma / 2) * T) / (sigma * sqT);
+    const d2 = d1 - sigma * sqT;
+    const dq = Math.exp(-q * T), dr = Math.exp(-r * T);
+    return type === "put"
+      ? K * dr * normCdf(-d2) - S * dq * normCdf(-d1)
+      : S * dq * normCdf(d1) - K * dr * normCdf(d2);
+  }
+
+  // Theoretical value used everywhere on the page: BSM, floored at intrinsic
+  // (a listed US option can always be exercised for at least that).
+  const value = (S, K, T, r, q, sigma, type) => Math.max(bsm(S, K, T, r, q, sigma, type), intrinsic(S, K, type));
+
+  // Greeks per share: theta per calendar day, vega per 1 IV point, rho per
+  // 1 rate point. null at/after expiration — there's nothing left to measure.
+  function greeks(S, K, T, r, q, sigma, type) {
+    if (T <= 0 || !(sigma > 0) || !(S > 0) || !(K > 0)) return null;
+    const sqT = Math.sqrt(T);
+    const d1 = (Math.log(S / K) + (r - q + sigma * sigma / 2) * T) / (sigma * sqT);
+    const d2 = d1 - sigma * sqT;
+    const dq = Math.exp(-q * T), dr = Math.exp(-r * T);
+    const pdf = normPdf(d1);
+    const gamma = dq * pdf / (S * sigma * sqT);
+    const vega = S * dq * pdf * sqT / 100;
+    const decay = -S * dq * pdf * sigma / (2 * sqT);
+    if (type === "put") {
+      return {
+        delta: dq * (normCdf(d1) - 1), gamma, vega,
+        theta: (decay + r * K * dr * normCdf(-d2) - q * S * dq * normCdf(-d1)) / 365,
+        rho: -K * T * dr * normCdf(-d2) / 100,
+      };
+    }
+    return {
+      delta: dq * normCdf(d1), gamma, vega,
+      theta: (decay - r * K * dr * normCdf(d2) + q * S * dq * normCdf(d1)) / 365,
+      rho: K * T * dr * normCdf(d2) / 100,
+    };
+  }
+
+  // Volatility that makes the BSM price equal `price` (bisection — price is
+  // monotone in sigma). null when the premium is outside what any volatility
+  // could produce (e.g. below intrinsic).
+  function impliedVol(price, S, K, T, r, q, type) {
+    if (!(price > 0) || T <= 0) return null;
+    let lo = 1e-4, hi = 5;
+    if (price < bsm(S, K, T, r, q, lo, type) - 1e-9 || price > bsm(S, K, T, r, q, hi, type)) return null;
+    for (let i = 0; i < 200; i++) {
+      const mid = (lo + hi) / 2;
+      if (bsm(S, K, T, r, q, mid, type) > price) hi = mid; else lo = mid;
+      if (hi - lo < 1e-9) break;
+    }
+    return (lo + hi) / 2;
+  }
+
+  // Whole calendar days between two local dates ("YYYY-MM-DD" or Date).
+  function toLocalDate(d) {
+    if (d instanceof Date) return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    const [y, m, day] = String(d).split("-").map(Number);
+    return new Date(y, m - 1, day);
+  }
+  const daysBetween = (a, b) => Math.round((toLocalDate(b) - toLocalDate(a)) / DAY_MS);
+  const addDays = (d, n) => { const x = toLocalDate(d); x.setDate(x.getDate() + n); return x; };
+  const isoDate = (d) => {
+    const x = toLocalDate(d);
+    return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`;
+  };
+
+  /* A contract = normalized inputs:
+     { type, S, K, premium, dte, iv, r, q, today (Date) }
+     `day` below is days from today (0 … dte). */
+  const yearsLeft = (c, day) => Math.max(c.dte - day, 0) / 365;
+  const valueAt = (c, S, day, sigma) => value(S, c.K, yearsLeft(c, day), c.r, c.q, sigma, c.type);
+  const pnl = (c, v) => (v - c.premium) * MULT;
+  const ret = (c, v) => (v - c.premium) / c.premium;
+
+  function overview(c) {
+    const isPut = c.type === "put";
+    const breakEven = isPut ? c.K - c.premium : c.K + c.premium;
+    const intr = intrinsic(c.S, c.K, c.type);
+    const otmDist = isPut ? (c.S - c.K) / c.S : (c.K - c.S) / c.S;   // >0 means OTM
+    const moneyness = Math.abs(otmDist) <= 0.01 ? "ATM" : otmDist > 0 ? "OTM" : "ITM";
+    return {
+      breakEven,
+      requiredMove: (breakEven - c.S) / c.S,
+      moneyness, moneynessPct: Math.abs(otmDist),
+      intrinsic: intr,
+      extrinsic: c.premium - intr,          // negative = premium below intrinsic (flagged by the UI)
+      cost: c.premium * MULT,
+      maxLoss: c.premium * MULT,
+    };
+  }
+
+  // Evenly spaced day offsets from today to expiration (always includes both ends).
+  function daySteps(dte, maxPoints = 120) {
+    if (dte <= 0) return [0];
+    const n = Math.min(dte, maxPoints);
+    const out = [];
+    for (let i = 0; i <= n; i++) out.push(Math.round(i * dte / n));
+    return [...new Set(out)];
+  }
+
+  // Value / P&L / return of each assumed stock price at each day — the
+  // "Performance Over Time" chart and the Performance Curve table.
+  function overTime(c, prices, sigma, days = daySteps(c.dte)) {
+    return prices.map(S => ({
+      price: S,
+      points: days.map(day => {
+        const v = valueAt(c, S, day, sigma);
+        return { day, value: v, pnl: pnl(c, v), ret: ret(c, v) };
+      }),
+    }));
+  }
+
+  // Value across a stock-price grid on a given day — the P&L-by-price chart.
+  function byPrice(c, day, sigma, lo, hi, n = 160) {
+    const out = [];
+    for (let i = 0; i <= n; i++) {
+      const S = lo + (hi - lo) * i / n;
+      const v = valueAt(c, S, day, sigma);
+      out.push({ price: S, value: v, pnl: pnl(c, v), ret: ret(c, v) });
+    }
+    return out;
+  }
+
+  // Theta view: stock and IV held at today's values.
+  function decay(c, days = daySteps(c.dte)) {
+    return days.map(day => {
+      const v = valueAt(c, c.S, day, c.iv);
+      return { day, value: v, remaining: v / c.premium, lost: 1 - v / c.premium };
+    });
+  }
+
+  // "Nice" round step for axis-like price lists (1/2/2.5/5 × 10^n).
+  function niceStep(raw) {
+    const p = Math.pow(10, Math.floor(Math.log10(raw)));
+    const f = raw / p;
+    return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p;
+  }
+  // Default assumed stock prices for the time chart: 6 round values spanning
+  // the bear target (or −15%) to the bull target (or +40%).
+  function defaultPrices(S, bear, bull) {
+    const lo = Math.min(bear > 0 ? bear : Infinity, S * 0.85);
+    const hi = Math.max(bull > 0 ? bull : 0, S * 1.4);
+    const step = niceStep((hi - lo) / 5);
+    const start = Math.floor(lo / step) * step;
+    const out = [];
+    for (let i = 0; out.length < 6 && i < 12; i++) {
+      const p = +(start + i * step).toFixed(2);
+      if (p > 0) out.push(p);
+    }
+    return out;
+  }
+
+  return {
+    MULT, normCdf, normPdf, intrinsic, bsm, value, greeks, impliedVol,
+    toLocalDate, daysBetween, addDays, isoDate,
+    yearsLeft, valueAt, pnl, ret, overview, daySteps, overTime, byPrice, decay,
+    niceStep, defaultPrices,
+  };
+})();
+/* ── OptionMath:end ── */
+
+/* ── Option Insight page ────────────────────────────────────────────────────
+   Layers, strictly one-way:
+     form inputs → OptionMath (numbers) → buildOptionFacts (one object of
+     computed facts) → renderers / template summary. Free: everything runs
+   in the browser, no paid service is called. */
+const OI_KEY = "optionInsight.inputs.v1";
+const OI_FIELDS = ["ticker", "S", "K", "premium", "exp", "iv", "delta", "gamma", "theta", "vega",
+  "bid", "ask", "oi", "volume", "r", "q", "bear", "base", "bull", "target"];
+const OI_MAX_PRICES = 8;
+// Diverging ramp (validated): red arm below today's stock price, blue arm
+// above, gray within ±1%. Each arm runs near → far from today's price.
+const OI_BELOW = ["#9a3a3a", "#c64b4b", "#e66767", "#f39a9a"];
+const OI_ABOVE = ["#256abf", "#3987e5", "#6da7ec", "#9ec5f4"];
+const OI_NEUTRAL = "#8a8984";
+const OI_THESIS_COLORS = { bear: "#d43232", base: "#3987e5", bull: "#06b07a" };
+const OI_POS = "#35c294", OI_NEG = "#ff8f8f";
+
+/* Thresholds behind the General Insight categories — kept in one place so
+   the labels are easy to audit and tune. */
+const INSIGHT_THRESHOLDS = {
+  breakEven: { low: 0.10, moderate: 0.25 },        // |required move| to break even at expiration
+  timeDecay: { low: 0.003, moderate: 0.01 },       // theta as a share of premium per day
+  ivRisk:    { low: 0.10, moderate: 0.25 },        // value lost to a 10-pt IV drop, share of premium
+  thesisFit: { strong: 0.50 },                     // base-case return at the target date
+  leverage:  { moderate: 3, high: 8 },             // option return ÷ stock move, favorable case
+};
+
+let oi = null;                 // analyzed state; null until a valid Analyze
+let oiType = "call";
+let oiBound = false;
+let oiRaf = 0;
+
+const oiEl = (id) => document.getElementById(id);
+function fmtUsd(v, dec = 2) {
+  if (!isFinite(v)) return EMDASH;
+  const s = Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: dec, maximumFractionDigits: dec });
+  return (v < 0 && +s.replace(/,/g, "") !== 0 ? "−$" : "$") + s;
+}
+function fmtSignedMoney(v, dec = 0) {
+  if (!isFinite(v)) return EMDASH;
+  const s = Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: dec, maximumFractionDigits: dec });
+  if (+s.replace(/,/g, "") === 0) return "$" + s;
+  return (v > 0 ? "+$" : "−$") + s;
+}
+function fmtSignedPct(v, dec = 1) {
+  if (!isFinite(v)) return EMDASH;
+  const s = Math.abs(v * 100).toLocaleString("en-US", { minimumFractionDigits: dec, maximumFractionDigits: dec });
+  if (+s.replace(/,/g, "") === 0) return s + "%";
+  return (v > 0 ? "+" : "−") + s + "%";
+}
+const fmtPctPlain = (v, dec = 1) => isFinite(v) ? (v * 100).toFixed(dec).replace(/^-(0\.?0*)$/, "$1") + "%" : EMDASH;
+const fmtPrice = (p) => "$" + (Math.abs(p - Math.round(p)) < 1e-9 ? p.toFixed(0) : p.toFixed(2));
+const toneClass = (v) => v > 1e-9 ? "oi-pos" : v < -1e-9 ? "oi-neg" : "";
+const OI_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function oiDate(day, withYear = true) {
+  const d = OptionMath.addDays(oi.c.today, day);
+  return `${OI_MONTHS[d.getMonth()]} ${d.getDate()}` + (withYear ? `, ${d.getFullYear()}` : "");
+}
+function oiDateShort(day) {
+  const d = OptionMath.addDays(oi.c.today, day);
+  const sameYear = d.getFullYear() === oi.c.today.getFullYear();
+  return `${OI_MONTHS[d.getMonth()]} ${d.getDate()}` + (sameYear ? "" : ` '${String(d.getFullYear()).slice(2)}`);
+}
+const oiDaysLabel = (n) => n === 1 ? "1 day" : `${n} days`;
+
+/* ── Form ──────────────────────────────────────────────────────────────── */
+function oiReadRaw() {
+  const raw = { type: oiType };
+  for (const f of OI_FIELDS) raw[f] = oiEl("oiF_" + f).value.trim();
+  return raw;
+}
+function oiWriteRaw(raw) {
+  for (const f of OI_FIELDS) oiEl("oiF_" + f).value = raw[f] != null ? raw[f] : "";
+  oiSetType(raw.type === "put" ? "put" : "call");
+  const hasOptional = ["delta", "gamma", "theta", "vega", "bid", "ask", "oi", "volume", "r", "q"].some(f => raw[f]);
+  if (hasOptional) oiEl("oiOptional").open = true;
+}
+function oiSetType(t) {
+  oiType = t;
+  oiEl("oiType").querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.type === t)));
+}
+function oiNum(s) {
+  if (s == null || String(s).trim() === "") return null;
+  const v = Number(String(s).replace(/[$,%\s]/g, ""));
+  return isFinite(v) ? v : NaN;
+}
+function oiSaveRaw(raw) { try { localStorage.setItem(OI_KEY, JSON.stringify(raw)); } catch { /* private mode */ } }
+function oiLoadRaw() { try { return JSON.parse(localStorage.getItem(OI_KEY) || "null"); } catch { return null; } }
+
+// Parses + validates. Returns { errors:[{field,msg}], c, thesis, entered, notes }.
+function oiParse(raw) {
+  const errors = [], notes = [];
+  const n = {};
+  for (const f of OI_FIELDS) if (f !== "ticker" && f !== "exp" && f !== "target") n[f] = oiNum(raw[f]);
+  const bad = (field, msg) => errors.push({ field, msg });
+  if (!raw.ticker) bad("ticker", "Enter a ticker or name.");
+  if (!(n.S > 0)) bad("S", "Stock price must be a positive number.");
+  if (!(n.K > 0)) bad("K", "Strike must be a positive number.");
+  if (!(n.premium > 0)) bad("premium", "Premium must be a positive number.");
+  if (!(n.iv >= 1 && n.iv <= 500)) bad("iv", "IV must be between 1 and 500 (%).");
+  const today = OptionMath.toLocalDate(new Date());
+  let dte = NaN;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw.exp)) bad("exp", "Pick an expiration date.");
+  else {
+    dte = OptionMath.daysBetween(today, raw.exp);
+    if (dte < 1) bad("exp", "Expiration must be after today.");
+  }
+  for (const f of ["delta", "gamma", "theta", "vega"]) if (Number.isNaN(n[f])) bad(f, `${f[0].toUpperCase() + f.slice(1)} must be a number.`);
+  for (const f of ["bid", "ask", "oi", "volume"]) if (Number.isNaN(n[f]) || n[f] < 0) bad(f, `${{ bid: "Bid", ask: "Ask", oi: "Open interest", volume: "Volume" }[f]} must be zero or more.`);
+  if (n.bid != null && n.ask != null && n.ask < n.bid) bad("ask", "Ask must be at least the bid.");
+  if (Number.isNaN(n.r) || (n.r != null && (n.r < -5 || n.r > 30))) bad("r", "Risk-free rate must be between −5% and 30%.");
+  if (Number.isNaN(n.q) || (n.q != null && (n.q < 0 || n.q > 30))) bad("q", "Dividend yield must be between 0% and 30%.");
+  for (const f of ["bear", "base", "bull"]) if (Number.isNaN(n[f]) || (n[f] != null && !(n[f] > 0))) bad(f, `${f[0].toUpperCase() + f.slice(1)} price must be a positive number.`);
+  let targetDay = null, targetClamped = false;
+  if (raw.target) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(raw.target)) bad("target", "Target date isn't a valid date.");
+    else {
+      targetDay = OptionMath.daysBetween(today, raw.target);
+      if (targetDay < 0) bad("target", "Target date can't be in the past.");
+      else if (isFinite(dte) && targetDay > dte) { targetDay = dte; targetClamped = true; }
+    }
+  }
+  if (errors.length) return { errors };
+  if (targetClamped) notes.push("Your target date is after expiration, so the thesis is measured at expiration instead.");
+  const c = {
+    ticker: raw.ticker, type: raw.type === "put" ? "put" : "call",
+    S: n.S, K: n.K, premium: n.premium, dte, iv: n.iv / 100,
+    r: (n.r != null ? n.r : 4) / 100, q: (n.q != null ? n.q : 0) / 100,
+    today, exp: raw.exp,
+  };
+  const thesis = {
+    bear: n.bear, base: n.base, bull: n.bull,
+    targetDay: targetDay != null ? targetDay : dte, targetSet: targetDay != null && !targetClamped,
+  };
+  const entered = { delta: n.delta, gamma: n.gamma, theta: n.theta, vega: n.vega, bid: n.bid, ask: n.ask, oi: n.oi, volume: n.volume };
+  return { errors, c, thesis, entered, notes };
 }
 
-async function saveOptionsWatchlist(contracts) {
-  const res = await fetch(BRIDGE + "/api/options-watchlist", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ contracts }),
+function oiShowErrors(errors) {
+  OI_FIELDS.forEach(f => oiEl("oiF_" + f).classList.remove("is-invalid"));
+  const box = oiEl("oiFormError");
+  if (!errors.length) { box.hidden = true; return; }
+  errors.forEach(e => oiEl("oiF_" + e.field).classList.add("is-invalid"));
+  if (errors.some(e => ["delta", "gamma", "theta", "vega", "bid", "ask", "oi", "volume", "r", "q"].includes(e.field))) oiEl("oiOptional").open = true;
+  box.innerHTML = errors.map(e => escapeHtml(e.msg)).join("<br>");
+  box.hidden = false;
+}
+
+function oiAnalyze({ scroll = true, quiet = false } = {}) {
+  const raw = oiReadRaw();
+  const p = oiParse(raw);
+  if (p.errors.length) {
+    if (!quiet) oiShowErrors(p.errors);
+    return false;
+  }
+  oiShowErrors([]);
+  oiSaveRaw(raw);
+  const { c, thesis } = p;
+  const prices = OptionMath.defaultPrices(c.S, thesis.bear, thesis.bull);
+  oi = {
+    c, thesis, entered: p.entered, notes: p.notes,
+    prices, ivFuture: c.iv,
+    simS: thesis.base || c.S,
+    simDay: thesis.targetSet ? thesis.targetDay : Math.min(90, c.dte),
+    yMode: oi ? oi.yMode : "value",
+    pnlDate: "sim", pnlCustomDay: null, pnlY: oi ? oi.pnlY : "pnl",
+  };
+  oiEl("oiResults").hidden = false;
+  oiSetupControls();
+  oiRenderStatic();
+  oiRenderPriceChips();
+  oiRenderDynamic();
+  if (scroll) oiEl("oiResults").scrollIntoView({ behavior: "smooth", block: "start" });
+  return true;
+}
+
+function oiExampleRaw() {
+  const today = OptionMath.toLocalDate(new Date());
+  return {
+    ticker: "XYZ", type: "call", S: "150", K: "170", premium: "11.50",
+    exp: OptionMath.isoDate(OptionMath.addDays(today, 257)), iv: "34.5",
+    delta: "", gamma: "", theta: "", vega: "", bid: "", ask: "", oi: "", volume: "", r: "4", q: "0",
+    bear: "135", base: "190", bull: "230", target: OptionMath.isoDate(OptionMath.addDays(today, 150)),
+  };
+}
+
+/* ── Controls that depend on the analyzed contract ───────────────────── */
+function oiSimRange() {
+  const lo = Math.max(0.01, Math.floor(Math.min(oi.prices[0], oi.c.S * 0.6, oi.thesis.bear || Infinity)));
+  const hi = Math.ceil(Math.max(oi.prices[oi.prices.length - 1], oi.c.S * 1.6, oi.thesis.bull || 0, oi.c.K * 1.2));
+  return { lo, hi, step: OptionMath.niceStep(oi.c.S / 200) };
+}
+function oiSetupControls() {
+  const iv = oiEl("oiIv");
+  iv.max = Math.max(200, Math.ceil(oi.c.iv * 200));
+  iv.value = (oi.c.iv * 100).toFixed(1);
+  const r = oiSimRange();
+  const sp = oiEl("oiSimPrice");
+  sp.min = r.lo; sp.max = r.hi; sp.step = r.step; sp.value = oi.simS;
+  oiEl("oiSimPriceNum").value = oi.simS.toFixed(2);
+  const sd = oiEl("oiSimDay");
+  sd.max = oi.c.dte; sd.value = oi.simDay;
+  const custom = oiEl("oiPnlCustom");
+  custom.min = OptionMath.isoDate(oi.c.today); custom.max = oi.c.exp; custom.value = "";
+  oiSetSeg("oiPnlDateSeg", "d", oi.pnlDate);
+  oiSetSeg("oiPnlYSeg", "y", oi.pnlY);
+  oiSetSeg("oiYSeg", "y", oi.yMode);
+  oiEl("oiPnlDateSeg").querySelector('[data-d="target"]').hidden = !oi.thesis.targetSet;
+}
+function oiSetSeg(id, key, val) {
+  oiEl(id).querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset[key] === val)));
+}
+function oiSchedule() {
+  if (oiRaf) return;
+  oiRaf = requestAnimationFrame(() => { oiRaf = 0; oiRenderDynamic(); });
+}
+
+/* ── Facts: every number the page states, in one object ──────────────── */
+function oiGreeksToday() {
+  const c = oi.c;
+  return OptionMath.greeks(c.S, c.K, c.dte / 365, c.r, c.q, c.iv, c.type);
+}
+const oiRound = (v, d = 2) => isFinite(v) ? +v.toFixed(d) : null;
+
+function buildOptionFacts() {
+  const { c, thesis } = oi;
+  const M = OptionMath;
+  const o = M.overview(c);
+  const g = oiGreeksToday();
+  const use = (k) => oi.entered[k] != null ? oi.entered[k] : g ? g[k] : null;
+  const theta = use("theta"), vega = use("vega"), delta = use("delta"), gamma = use("gamma");
+  const sigma = oi.ivFuture;
+  const T = thesis.targetDay;
+  const isPut = c.type === "put";
+  const at = (S, day, s = sigma) => {
+    const v = M.valueAt(c, S, day, s);
+    return { stock: oiRound(S), value: oiRound(v), pnl: oiRound(M.pnl(c, v), 0), ret: oiRound(M.ret(c, v), 4) };
+  };
+  const scen = {};
+  for (const k of ["bear", "base", "bull"]) {
+    if (!(thesis[k] > 0)) continue;
+    scen[k] = { ...at(thesis[k], T), stockMove: oiRound((thesis[k] - c.S) / c.S, 4), atExpiration: at(thesis[k], c.dte) };
+  }
+  const timeDays = [30, 90, 180].filter(d => d < c.dte);
+  const timing = thesis.base > 0
+    ? [...timeDays.map(d => ({ label: `in ${d} days`, day: d, ...at(thesis.base, d) })), { label: "at expiration", day: c.dte, ...at(thesis.base, c.dte) }]
+    : [];
+  const ivAlt = Math.abs(sigma - c.iv) > 0.0049 ? sigma : Math.max(c.iv - 0.15, 0.05);
+  const ivRefS = thesis.base > 0 ? thesis.base : c.S;
+  const ivFrom = M.valueAt(c, ivRefS, T, c.iv), ivTo = M.valueAt(c, ivRefS, T, ivAlt);
+  const decayDays = oiDecayMilestones();
+  const decay = decayDays.map(d => {
+    const v = M.valueAt(c, c.S, d.day, c.iv);
+    return { label: d.label, day: d.day, value: oiRound(v), remaining: oiRound(v / c.premium, 4), lost: oiRound(1 - v / c.premium, 4) };
   });
-  const j = await res.json();
-  if (!res.ok || j.error) throw new Error(j.error || ("HTTP " + res.status));
-  optionsContracts = j.contracts || [];
-  renderOptionsChain();     // refresh "+ Add"/"Added" button state on visible rows
-  renderOptionsWatchlist();
-  refreshOptionsQuotes();
-}
-
-async function addOptionContract(contractSymbol, type) {
-  if (optionsContractSet().has(contractSymbol) || !optionsChain) return;
-  const row = optionsChain.calls.concat(optionsChain.puts).find(r => r.contractSymbol === contractSymbol);
-  if (!row) return;
-  const entry = { contractSymbol, ticker: optionsTicker, expiration: optionsExpiration, type, strike: row.strike };
-  try {
-    await saveOptionsWatchlist([...optionsContracts, entry]);
-    flashToast("Added " + contractSymbol + " to your options watchlist.");
-  } catch (e) {
-    flashToast("Couldn't add contract — " + String(e.message || e), true);
+  const thetaPct = theta != null ? Math.abs(theta) / c.premium : null;
+  const ivDrop10 = vega != null ? Math.abs(vega) * 10 / c.premium : null;
+  const fav = isPut ? "bear" : "bull";
+  const leverage = scen[fav] && Math.abs(scen[fav].stockMove) > 1e-6
+    ? scen[fav].ret / Math.abs(scen[fav].stockMove) : null;
+  const misaligned = thesis.base > 0 && (isPut ? thesis.base > c.S : thesis.base < c.S);
+  const liq = {};
+  if (oi.entered.bid != null && oi.entered.ask != null && oi.entered.ask > 0) {
+    const mid = (oi.entered.bid + oi.entered.ask) / 2;
+    liq.bid = oi.entered.bid; liq.ask = oi.entered.ask; liq.mid = oiRound(mid);
+    liq.spread = oiRound(oi.entered.ask - oi.entered.bid);
+    liq.spreadPctOfMid = mid > 0 ? oiRound((oi.entered.ask - oi.entered.bid) / mid, 4) : null;
   }
+  if (oi.entered.oi != null) liq.openInterest = oi.entered.oi;
+  if (oi.entered.volume != null) liq.volume = oi.entered.volume;
+
+  const T_ = INSIGHT_THRESHOLDS;
+  const lvl3 = (v, lo, mid, names) => v == null ? null : v < lo ? names[0] : v < mid ? names[1] : names[2];
+  const categories = {
+    breakEvenRequirement: lvl3(Math.abs(o.requiredMove), T_.breakEven.low, T_.breakEven.moderate, ["Low", "Moderate", "High"]),
+    timeDecay: lvl3(thetaPct, T_.timeDecay.low, T_.timeDecay.moderate, ["Low", "Moderate", "High"]),
+    ivRisk: lvl3(ivDrop10, T_.ivRisk.low, T_.ivRisk.moderate, ["Low", "Moderate", "High"]),
+    thesisFit: !(thesis.base > 0) ? null : misaligned ? "Misaligned"
+      : scen.base.ret >= T_.thesisFit.strong ? "Strong" : scen.base.ret > 0 ? "Moderate" : "Weak",
+    upsideLeverage: leverage == null ? null : leverage < T_.leverage.moderate ? "Low" : leverage < T_.leverage.high ? "Moderate" : "High",
+  };
+  const modelValueToday = M.valueAt(c, c.S, 0, c.iv);
+  return {
+    contract: {
+      ticker: c.ticker, type: c.type, strike: c.K, stockPrice: c.S, premiumPerShare: c.premium,
+      contractCost: oiRound(o.cost), expiration: c.exp, daysToExpiration: c.dte,
+      currentIvPct: oiRound(c.iv * 100, 1), futureIvPct: oiRound(sigma * 100, 1),
+      riskFreeRatePct: oiRound(c.r * 100, 2), dividendYieldPct: oiRound(c.q * 100, 2),
+    },
+    overview: {
+      breakEven: oiRound(o.breakEven), requiredMovePct: oiRound(o.requiredMove * 100, 1),
+      moneyness: o.moneyness, moneynessPct: oiRound(o.moneynessPct * 100, 1),
+      intrinsic: oiRound(o.intrinsic), extrinsic: oiRound(o.extrinsic),
+      maxLoss: oiRound(o.maxLoss), maxLossPct: 100,
+      modelValueTodayAtCurrentIv: oiRound(modelValueToday),
+    },
+    greeksPerContract: {
+      source: Object.fromEntries(["delta", "gamma", "theta", "vega"].map(k => [k, oi.entered[k] != null ? "entered" : "estimated"])),
+      delta: delta != null ? oiRound(delta * 100) : null,
+      gamma: gamma != null ? oiRound(gamma * 100, 3) : null,
+      thetaPerDay: theta != null ? oiRound(theta * 100) : null,
+      vegaPerIvPoint: vega != null ? oiRound(vega * 100) : null,
+      thetaPctOfPremiumPerDay: thetaPct != null ? oiRound(thetaPct * 100, 2) : null,
+    },
+    thesis: {
+      valuationDate: M.isoDate(M.addDays(c.today, T)), daysFromToday: T,
+      targetDateEntered: thesis.targetSet, scenarios: scen, directionMisaligned: misaligned,
+    },
+    timeSensitivity: thesis.base > 0 ? { stockPrice: thesis.base, outcomes: timing } : null,
+    ivRisk: {
+      stockPrice: oiRound(ivRefS), daysFromToday: T,
+      fromIvPct: oiRound(c.iv * 100, 1), toIvPct: oiRound(ivAlt * 100, 1),
+      valueFrom: oiRound(ivFrom), valueTo: oiRound(ivTo),
+      perContractChange: oiRound((ivTo - ivFrom) * 100, 0),
+      tenPointDropShareOfPremiumPct: ivDrop10 != null ? oiRound(ivDrop10 * 100, 1) : null,
+    },
+    timeDecay: { stockAndIvUnchanged: true, milestones: decay },
+    liquidity: Object.keys(liq).length ? liq : null,
+    leverage: leverage != null ? { scenario: fav, optionReturnPerStockMove: oiRound(leverage, 1) } : null,
+    categories,
+  };
 }
 
-async function removeOptionContract(contractSymbol) {
-  try {
-    await saveOptionsWatchlist(optionsContracts.filter(c => c.contractSymbol !== contractSymbol));
-  } catch (e) {
-    flashToast("Couldn't remove contract — " + String(e.message || e), true);
+/* ── Generic line chart ──────────────────────────────────────────────── */
+// cfg: { vb:{w,h}, pad:{l,r,t,b}, x0, x1, y0, y1, xTicks:[{v,label}], yFmt,
+//        series:[{color,width,dash,pts:[[x,y]],at:(x)=>y,end}], vlines, hlines,
+//        dot:{x,y,color}, snap:(x)=>x, keyXs:[x], tip:(x)=>html }
+function oiDrawChart(svgId, tipId, cfg) {
+  const svg = oiEl(svgId);
+  const { w, h } = cfg.vb, P = cfg.pad;
+  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  [...svg.childNodes].forEach(n => { if (n.nodeName !== "title" && n.nodeName !== "desc") n.remove(); });
+  const yt = niceTicks(cfg.y0, cfg.y1, 6);
+  const ylo = yt[0], yhi = yt[yt.length - 1];
+  const plotW = w - P.l - P.r, plotH = h - P.t - P.b;
+  const X = (v) => P.l + (v - cfg.x0) / ((cfg.x1 - cfg.x0) || 1) * plotW;
+  const Y = (v) => P.t + (1 - (v - ylo) / ((yhi - ylo) || 1)) * plotH;
+  cfg.X = X; cfg.Y = Y;
+  cfg.invX = (px) => cfg.x0 + (px - P.l) / plotW * (cfg.x1 - cfg.x0);
+  for (const t of yt) {
+    svg.appendChild(el("line", { x1: P.l, x2: w - P.r, y1: Y(t), y2: Y(t),
+      stroke: Math.abs(t) < 1e-9 && cfg.zeroStrong ? "#55554f" : "#2c2c2a", "stroke-width": "1", "shape-rendering": "crispEdges" }));
+    const tx = el("text", { x: P.l - 10, y: Y(t) + 4, "text-anchor": "end",
+      fill: "#78776f", "font-size": "11", "font-family": "inherit", "font-variant-numeric": "tabular-nums" });
+    tx.textContent = cfg.yFmt(t);
+    svg.appendChild(tx);
   }
-}
-
-function optionContractLabel(c) {
-  return `${c.ticker} $${c.strike.toFixed(2)} ${c.type === "call" ? "Call" : "Put"}`;
-}
-
-function renderOptionsWatchlist(prevQuoteMap = {}) {
-  const empty = document.getElementById("optionsWatchlistEmpty");
-  const wrap = document.getElementById("optionsWatchlistTableWrap");
-  if (!optionsContracts.length) {
-    empty.hidden = false;
-    wrap.hidden = true;
-    document.getElementById("optionsWatchlistBody").innerHTML = "";
-    return;
+  svg.appendChild(el("line", { x1: P.l, x2: w - P.r, y1: h - P.b, y2: h - P.b, stroke: "#383835", "stroke-width": "1", "shape-rendering": "crispEdges" }));
+  for (const t of cfg.xTicks) {
+    const tx = el("text", { x: X(t.v), y: h - P.b + 18, "text-anchor": "middle",
+      fill: "#78776f", "font-size": "11", "font-family": "inherit", "font-variant-numeric": "tabular-nums" });
+    tx.textContent = t.label;
+    svg.appendChild(tx);
   }
-  empty.hidden = true;
-  wrap.hidden = false;
-  document.getElementById("optionsWatchlistBody").innerHTML = optionsContracts.map(c => {
-    const label = optionContractLabel(c);
-    return `<tr data-contract="${c.contractSymbol}" style="cursor:pointer">
-      <td style="text-align:left;font-weight:650">${label}</td>
-      <td style="text-align:left">${c.expiration}</td>
-      <td>${watchlistChangeHtml(optionsQuoteMap[c.contractSymbol] || {}, prevQuoteMap[c.contractSymbol])}</td>
-      <td><button type="button" class="wl-remove" data-remove-contract="${c.contractSymbol}"
-        title="Remove" aria-label="Remove ${label}">×</button></td>
-    </tr>`;
+  for (const hl of cfg.hlines || []) {
+    if (hl.y < ylo || hl.y > yhi) continue;
+    svg.appendChild(el("line", { x1: P.l, x2: w - P.r, y1: Y(hl.y), y2: Y(hl.y), stroke: hl.color,
+      "stroke-width": "1", "stroke-dasharray": hl.dash || "none", "shape-rendering": "crispEdges" }));
+    if (hl.label) {
+      const tx = el("text", { x: P.l + 6, y: Y(hl.y) - 5, fill: hl.color, "font-size": "10.5", "font-family": "inherit", "font-weight": "600" });
+      tx.textContent = hl.label;
+      svg.appendChild(tx);
+    }
+  }
+  // Vertical markers, labels staggered into rows so neighbours don't collide.
+  const vls = (cfg.vlines || []).filter(v => v.x >= cfg.x0 && v.x <= cfg.x1).sort((a, b) => a.x - b.x);
+  const rowEnd = [];
+  for (const v of vls) {
+    const x = X(v.x);
+    svg.appendChild(el("line", { x1: x, x2: x, y1: P.t, y2: h - P.b, stroke: v.color, "stroke-width": "1.2",
+      "stroke-dasharray": v.dash || "4 4", opacity: ".85" }));
+    if (!v.label) continue;
+    const wLab = v.label.length * 6.2 + 8;
+    let row = 0;
+    while (rowEnd[row] != null && rowEnd[row] > x - wLab / 2) row++;
+    rowEnd[row] = x + wLab / 2;
+    const tx = el("text", { x: Math.min(Math.max(x, P.l + wLab / 2), w - P.r - wLab / 2), y: P.t - 8 - row * 13, "text-anchor": "middle",
+      fill: v.color, "font-size": "10.5", "font-family": "inherit", "font-weight": "650" });
+    tx.textContent = v.label;
+    svg.appendChild(tx);
+  }
+  const ends = [];
+  cfg.series.forEach((s) => {
+    const d = s.pts.map(([x, y], i) => (i ? "L" : "M") + X(x).toFixed(1) + "," + Y(Math.min(Math.max(y, ylo), yhi)).toFixed(1)).join("");
+    svg.appendChild(el("path", { d, fill: "none", stroke: s.color, "stroke-width": s.width || 2,
+      "stroke-dasharray": s.dash || "none", "stroke-linejoin": "round", "stroke-linecap": "round" }));
+    if (s.end) { const [lx, ly] = s.pts[s.pts.length - 1]; ends.push({ y: Y(Math.min(Math.max(ly, ylo), yhi)), x: X(lx), text: s.end, color: s.color }); }
+  });
+  // Direct end labels, nudged apart vertically.
+  ends.sort((a, b) => a.y - b.y);
+  for (let i = 1; i < ends.length; i++) if (ends[i].y - ends[i - 1].y < 13) ends[i].y = ends[i - 1].y + 13;
+  for (let i = ends.length - 2; i >= 0; i--) if (ends[i].y > ends[i + 1].y - 13) ends[i].y = ends[i + 1].y - 13;
+  for (const e of ends) {
+    const tx = el("text", { x: e.x + 8, y: e.y + 4, fill: e.color, "font-size": "11", "font-weight": "700", "font-family": "inherit", "font-variant-numeric": "tabular-nums" });
+    tx.textContent = e.text;
+    svg.appendChild(tx);
+  }
+  if (cfg.dot) {
+    svg.appendChild(el("circle", { cx: X(cfg.dot.x), cy: Y(Math.min(Math.max(cfg.dot.y, ylo), yhi)), r: 6,
+      fill: cfg.dot.color, stroke: "#16161a", "stroke-width": "2.5" }));
+  }
+  // Crosshair + per-series hover dots, positioned on hover.
+  svg.appendChild(el("line", { class: "oi-xhair", y1: P.t, y2: h - P.b, stroke: "#4a4a46", "stroke-width": "1", opacity: "0" }));
+  cfg.series.forEach((s, i) => {
+    if (s.at) svg.appendChild(el("circle", { class: "oi-xdot", "data-i": i, r: 4.5, fill: s.color, stroke: "#16161a", "stroke-width": "2", opacity: "0" }));
+  });
+  svg.appendChild(el("rect", { x: P.l, y: P.t, width: plotW, height: plotH, fill: "transparent" }));
+  cfg.ylo = ylo; cfg.yhi = yhi;
+  svg._oiCfg = cfg;
+  oiBindChart(svg, oiEl(tipId));
+  if (svg._oiTipX != null) oiShowTip(svg, oiEl(tipId), svg._oiTipX);
+}
+// Listeners are bound once per chart and always read the latest cfg — the
+// charts redraw on every slider tick, so re-binding would pile them up.
+function oiBindChart(svg, tip) {
+  if (svg._oiBound) return;
+  svg._oiBound = true;
+  const fromClient = (clientX) => {
+    const cfg = svg._oiCfg; if (!cfg) return;
+    const r = svg.getBoundingClientRect();
+    const px = (clientX - r.left) * cfg.vb.w / r.width;
+    const x = Math.min(Math.max(cfg.invX(px), cfg.x0), cfg.x1);
+    oiShowTip(svg, tip, cfg.snap(x));
+  };
+  // Pointer events cover mouse, pen and touch alike. Only a mouse leaving
+  // hides the readout — after a tap it stays up until something else is
+  // tapped (which blurs the chart).
+  svg.addEventListener("pointermove", (e) => fromClient(e.clientX));
+  svg.addEventListener("pointerdown", (e) => fromClient(e.clientX));
+  svg.addEventListener("pointerleave", (e) => { if (e.pointerType === "mouse") oiHideTip(svg, tip); });
+  svg.addEventListener("blur", () => oiHideTip(svg, tip));
+  svg.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    const xs = svg._oiCfg.keyXs;
+    let i = svg._oiTipX == null ? -1 : xs.findIndex(x => x >= svg._oiTipX - 1e-9);
+    if (i < 0) i = e.key === "ArrowRight" ? -1 : xs.length;
+    i = Math.max(0, Math.min(xs.length - 1, i + (e.key === "ArrowRight" ? 1 : -1)));
+    oiShowTip(svg, tip, xs[i]);
+  });
+}
+function oiShowTip(svg, tip, x) {
+  const cfg = svg._oiCfg;
+  svg._oiTipX = x;
+  const px = cfg.X(x);
+  const xh = svg.querySelector(".oi-xhair");
+  xh.setAttribute("x1", px); xh.setAttribute("x2", px); xh.setAttribute("opacity", "1");
+  svg.querySelectorAll(".oi-xdot").forEach(d => {
+    const s = cfg.series[+d.dataset.i];
+    const y = s.at(x);
+    d.setAttribute("cx", px);
+    d.setAttribute("cy", cfg.Y(Math.min(Math.max(y, cfg.ylo), cfg.yhi)));
+    d.setAttribute("opacity", "1");
+  });
+  tip.innerHTML = cfg.tip(x);
+  tip.classList.add("show");
+  const r = svg.getBoundingClientRect();
+  const scale = r.width / cfg.vb.w;
+  const cx = px * scale;
+  let left = cx + 16;
+  if (left + tip.offsetWidth > r.width - 8) left = cx - tip.offsetWidth - 16;
+  tip.style.left = Math.max(8, left) + "px";
+  tip.style.top = (cfg.pad.t * scale + 6) + "px";
+}
+function oiHideTip(svg, tip) {
+  svg._oiTipX = null;
+  tip.classList.remove("show");
+  svg.querySelectorAll(".oi-xhair, .oi-xdot").forEach(n => n.setAttribute("opacity", "0"));
+}
+const oiTipRow = (color, name, val) => `<div class="tt-row"><span class="swatch" style="background:${color}"></span><span class="name">${name}</span><span class="val">${val}</span></div>`;
+
+/* Day ticks: ~6 evenly spaced dates from today to expiration. */
+function oiDayTicks(dte, n = 6) {
+  const out = [];
+  const k = Math.min(n, dte);
+  for (let i = 0; i <= k; i++) {
+    const d = Math.round(i * dte / k);
+    if (!out.some(t => t.v === d)) out.push({ v: d, label: i === 0 ? "Today" : oiDateShort(d) });
+  }
+  return out;
+}
+function oiPriceColor(p) {
+  const S = oi.c.S;
+  if (Math.abs(p - S) / S <= 0.01) return OI_NEUTRAL;
+  const side = oi.prices.filter(x => Math.abs(x - S) / S > 0.01 && (p < S ? x < S : x > S))
+    .sort((a, b) => Math.abs(a - S) - Math.abs(b - S));
+  const arm = p < S ? OI_BELOW : OI_ABOVE;
+  return arm[Math.min(side.indexOf(p), arm.length - 1)];
+}
+const OI_Y = {
+  value: { label: "Option value", get: (pt) => pt.value, fmt: (v) => fmtUsd(v), axis: (v) => "$" + (Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(Math.abs(v) < 10 ? 2 : 1)) },
+  pnl:   { label: "P&L per contract", get: (pt) => pt.pnl, fmt: (v) => fmtSignedMoney(v), axis: (v) => fmtSignedMoney(v) },
+  ret:   { label: "Return", get: (pt) => pt.ret, fmt: (v) => fmtSignedPct(v), axis: (v) => fmtSignedPct(v, 0) },
+};
+const oiPoint = (S, day, sigma) => {
+  const v = OptionMath.valueAt(oi.c, S, day, sigma);
+  return { value: v, pnl: OptionMath.pnl(oi.c, v), ret: OptionMath.ret(oi.c, v) };
+};
+
+/* ── Renderers ───────────────────────────────────────────────────────── */
+function oiRenderStatic() {
+  oiRenderOverview();
+  oiRenderBanners();
+  oiRenderDecay();
+  oiRenderGreeks();
+}
+
+function oiRenderOverview() {
+  const c = oi.c, o = OptionMath.overview(c);
+  const label = `${c.ticker} ${fmtPrice(c.K)} ${c.type === "put" ? "Put" : "Call"}`;
+  oiEl("oiTitle").textContent = `Contract Overview · ${label}`;
+  const kpi = (lab, val, unit, cls = "") => `<div class="kpi"><div class="kpi-label">${lab}</div><div class="kpi-value ${cls}">${val}</div>${unit ? `<div class="kpi-unit">${unit}</div>` : ""}</div>`;
+  const dir = c.type === "put" ? "fall" : "rise";
+  const money = o.moneyness === "ATM" ? "At the money" : `${(o.moneynessPct * 100).toFixed(1)}% ${o.moneyness}`;
+  oiEl("oiOverview").innerHTML = [
+    kpi("Option", escapeHtml(label), `${oiDate(c.dte)} expiration`),
+    kpi("Stock price", fmtUsd(c.S)),
+    kpi("Premium", fmtUsd(c.premium), "per share"),
+    kpi("Contract cost", fmtUsd(o.cost, 0), "100 shares"),
+    kpi("Days to expiration", String(c.dte), oiDate(c.dte)),
+    kpi("Break-even", fmtUsd(o.breakEven), "at expiration"),
+    kpi("Required move", fmtSignedPct(o.requiredMove), `stock must ${dir} to break even`),
+    kpi("Moneyness", money, `strike ${fmtUsd(c.K)}`),
+    kpi("Max loss", fmtUsd(o.maxLoss, 0), "100% of premium", "oi-neg"),
+    kpi("Intrinsic value", fmtUsd(o.intrinsic), "per share"),
+    kpi("Extrinsic value", fmtUsd(o.extrinsic), "time + volatility value"),
+  ].join("");
+}
+
+function oiRenderBanners() {
+  const c = oi.c, M = OptionMath;
+  const out = [];
+  const intr = M.intrinsic(c.S, c.K, c.type);
+  const model = M.valueAt(c, c.S, 0, c.iv);
+  const implied = M.impliedVol(c.premium, c.S, c.K, c.dte / 365, c.r, c.q, c.type);
+  if (c.premium < intr - 1e-9) {
+    out.push(`<div class="oi-banner danger"><div>The premium (${fmtUsd(c.premium)}) is below the option's intrinsic value (${fmtUsd(intr)}). Double-check the inputs — projections use your entered IV of ${(c.iv * 100).toFixed(1)}%.</div></div>`);
+  } else if (Math.abs(model - c.premium) > Math.max(0.03 * c.premium, 0.05)) {
+    const implTxt = implied != null
+      ? `Your premium implies an IV of <strong>${(implied * 100).toFixed(1)}%</strong>.`
+      : "No volatility in the model's range reproduces that premium.";
+    out.push(`<div class="oi-banner"><div>At ${(c.iv * 100).toFixed(1)}% IV the model values this option at <strong>${fmtUsd(model)}</strong> today, vs the <strong>${fmtUsd(c.premium)}</strong> you entered — so "today" on the charts won't sit exactly at $0 P&amp;L. ${implTxt}</div>${implied != null ? `<button type="button" class="btn btn-ghost" id="oiUseImplied" data-iv="${(implied * 100).toFixed(1)}">Use implied IV</button>` : ""}</div>`);
+  }
+  if (oi.thesis.base > 0 && (c.type === "put" ? oi.thesis.base > c.S : oi.thesis.base < c.S)) {
+    out.push(`<div class="oi-banner danger"><div><strong>Thesis misaligned:</strong> your base target (${fmtUsd(oi.thesis.base)}) is ${c.type === "put" ? "above" : "below"} today's price, but a ${c.type} profits when the stock ${c.type === "put" ? "falls" : "rises"}.</div></div>`);
+  }
+  for (const n of oi.notes) out.push(`<div class="oi-banner"><div>${escapeHtml(n)}</div></div>`);
+  oiEl("oiBanners").innerHTML = out.join("");
+  const btn = oiEl("oiUseImplied");
+  if (btn) btn.addEventListener("click", () => { oiEl("oiF_iv").value = btn.dataset.iv; oiAnalyze({ scroll: false }); });
+}
+
+function oiRenderPriceChips() {
+  const wrap = oiEl("oiPriceChips");
+  const chips = oi.prices.map(p => `<span class="oi-chip"><span class="swatch" style="background:${oiPriceColor(p)}"></span>${fmtPrice(p)} stock
+    ${oi.prices.length > 1 ? `<button type="button" data-rm="${p}" aria-label="Remove ${fmtPrice(p)} line">×</button>` : ""}</span>`).join("");
+  const add = oi.prices.length < OI_MAX_PRICES
+    ? `<form class="oi-chip-add" id="oiChipAdd"><input class="calc-input" id="oiChipInput" type="text" inputmode="decimal" placeholder="Add price" aria-label="Add a stock price line"><button class="btn btn-ghost" type="submit" style="min-height:0;padding:5px 11px;font-size:12px">Add</button></form>`
+    : "";
+  wrap.innerHTML = chips + add;
+}
+
+function oiRenderDynamic() {
+  if (!oi) return;
+  oiRenderIv();
+  oiRenderTimeChart();
+  oiRenderSim();
+  oiRenderPerfTable();
+  oiRenderPnl();
+  oiRenderThesis();
+  const facts = buildOptionFacts();
+  oiRenderInsights(facts);
+  oiRenderGeneral(facts);
+}
+
+function oiRenderIv() {
+  const c = oi.c;
+  const d = oi.ivFuture - c.iv;
+  oiEl("oiIvVal").textContent = (oi.ivFuture * 100).toFixed(1) + "%";
+  const now = oiPoint(oi.simS, oi.simDay, c.iv), fut = oiPoint(oi.simS, oi.simDay, oi.ivFuture);
+  const impact = (fut.value - now.value) * 100;
+  oiEl("oiIvReadout").innerHTML = Math.abs(d) < 0.0005
+    ? `Using current IV (${(c.iv * 100).toFixed(1)}%). Drag to see how a change in IV alone moves the value.`
+    : `IV change <strong style="color:var(--text-primary)">${d > 0 ? "+" : "−"}${Math.abs(d * 100).toFixed(1)} pts</strong> (${(c.iv * 100).toFixed(1)}% → ${(oi.ivFuture * 100).toFixed(1)}%) ·
+       impact at the simulator point (${fmtUsd(oi.simS)} on ${oiDate(oi.simDay)}): <strong class="${toneClass(impact)}">${fmtSignedMoney(impact)}</strong> per contract
+       (${fmtUsd(now.value)} → ${fmtUsd(fut.value)}). <button type="button" class="fill-btn" id="oiIvReset">Reset</button>`;
+  const rb = oiEl("oiIvReset");
+  if (rb) rb.addEventListener("click", () => { oi.ivFuture = c.iv; oiEl("oiIv").value = (c.iv * 100).toFixed(1); oiSchedule(); });
+}
+
+function oiRenderTimeChart() {
+  const c = oi.c, ym = OI_Y[oi.yMode], sigma = oi.ivFuture;
+  const days = OptionMath.daySteps(c.dte);
+  const grid = OptionMath.overTime(c, oi.prices, sigma, days);
+  let lo = Infinity, hi = -Infinity;
+  const series = grid.slice().reverse().map(row => {
+    const pts = row.points.map(pt => [pt.day, ym.get(pt)]);
+    pts.forEach(([, y]) => { lo = Math.min(lo, y); hi = Math.max(hi, y); });
+    return { color: oiPriceColor(row.price), width: 2, pts, end: fmtPrice(row.price), price: row.price,
+      at: (day) => ym.get(oiPoint(row.price, day, sigma)) };
+  });
+  const simPt = oiPoint(oi.simS, oi.simDay, sigma);
+  lo = Math.min(lo, ym.get(simPt)); hi = Math.max(hi, ym.get(simPt));
+  if (oi.yMode !== "value") { lo = Math.min(lo, 0); hi = Math.max(hi, 0); } else lo = 0;
+  const vlines = [];
+  if (oi.thesis.targetSet && oi.thesis.targetDay < c.dte) vlines.push({ x: oi.thesis.targetDay, label: "Target", color: "#ffd966" });
+  oiDrawChart("oiTimeChart", "oiTimeTip", {
+    vb: { w: 920, h: 360 }, pad: { l: 70, r: 64, t: 30, b: 34 },
+    x0: 0, x1: c.dte, y0: lo, y1: hi === lo ? lo + 1 : hi,
+    xTicks: oiDayTicks(c.dte), yFmt: ym.axis, zeroStrong: oi.yMode !== "value",
+    series, vlines,
+    hlines: oi.yMode === "value" ? [{ y: c.premium, label: `Paid ${fmtUsd(c.premium)}`, color: "#b99a35", dash: "3 4" }] : [],
+    dot: { x: oi.simDay, y: ym.get(simPt), color: "#ffd966" },
+    snap: (x) => Math.round(x), keyXs: days,
+    tip: (day) => `<div class="tt-year">${oiDate(day)} · ${c.dte - day} days left</div>` +
+      series.map(s => oiTipRow(s.color, `${fmtPrice(s.price)} stock`, ym.fmt(s.at(day)))).join(""),
+  });
+}
+
+function oiRenderSim() {
+  const c = oi.c;
+  const pt = oiPoint(oi.simS, oi.simDay, oi.ivFuture);
+  const left = c.dte - oi.simDay;
+  oiEl("oiSimDayVal").textContent = oi.simDay === 0 ? "Today" : oiDate(oi.simDay);
+  const row = (k, v, cls = "") => `<div class="row"><span class="k">${k}</span><span class="v ${cls}">${v}</span></div>`;
+  oiEl("oiSimOut").innerHTML = [
+    row("Estimated value / share", fmtUsd(pt.value), "big"),
+    row("Initial premium", fmtUsd(c.premium)),
+    row("Profit / loss", fmtSignedMoney(pt.pnl) + " / contract", toneClass(pt.pnl)),
+    row("Return", fmtSignedPct(pt.ret), toneClass(pt.ret)),
+    row("Time remaining", left === 0 ? "Expired (intrinsic only)" : oiDaysLabel(left)),
+    row("Stock move from today", fmtSignedPct((oi.simS - c.S) / c.S)),
+  ].join("");
+}
+
+function oiPerfRows() {
+  const c = oi.c;
+  const rows = [{ day: 0, label: "Today" }];
+  for (const d of [30, 60, 90, 180]) if (d < c.dte) rows.push({ day: d, label: `+${d} days` });
+  if (oi.thesis.targetSet && oi.thesis.targetDay > 0 && oi.thesis.targetDay < c.dte && !rows.some(r => r.day === oi.thesis.targetDay))
+    rows.push({ day: oi.thesis.targetDay, label: "Target", hl: true });
+  else if (oi.thesis.targetSet) { const r = rows.find(r => r.day === oi.thesis.targetDay); if (r) { r.label += " (target)"; r.hl = true; } }
+  rows.push({ day: c.dte, label: "Expiration", hl: oi.thesis.targetSet && oi.thesis.targetDay === c.dte });
+  return rows.sort((a, b) => a.day - b.day);
+}
+function oiRenderPerfTable() {
+  const ym = OI_Y[oi.yMode];
+  const prices = oi.prices.slice().sort((a, b) => a - b);
+  oiEl("oiPerfHint").textContent = `${ym.label} by date (rows) and stock price (columns) · IV ${(oi.ivFuture * 100).toFixed(1)}% · expiration = intrinsic value`;
+  const head = `<thead><tr><th>Date</th>${prices.map(p => `<th><span style="display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px;background:${oiPriceColor(p)}"></span>${fmtPrice(p)}</th>`).join("")}</tr></thead>`;
+  const body = oiPerfRows().map(r => `<tr class="${r.hl ? "oi-row-hl" : ""}"><th>${r.label}<div style="font-weight:500;color:var(--text-muted);font-size:11px;letter-spacing:0">${oiDate(r.day)}</div></th>${prices.map(p => {
+    const v = ym.get(oiPoint(p, r.day, oi.ivFuture));
+    return `<td class="${oi.yMode === "value" ? "" : toneClass(v)}">${ym.fmt(v)}</td>`;
+  }).join("")}</tr>`).join("");
+  oiEl("oiPerfTable").innerHTML = head + `<tbody>${body}</tbody>`;
+}
+
+function oiDecayMilestones() {
+  const dte = oi.c.dte;
+  const out = [{ day: 0, label: "Today" }];
+  for (const d of [30, 60, 90, 180]) if (d < dte) out.push({ day: d, label: `+${d} days` });
+  for (const left of [30, 7]) {
+    const d = dte - left;
+    if (d > 0 && !out.some(m => Math.abs(m.day - d) < 5)) out.push({ day: d, label: `${left} days left` });
+  }
+  out.push({ day: dte, label: "Expiration" });
+  return out.sort((a, b) => a.day - b.day);
+}
+function oiRenderDecay() {
+  const c = oi.c, M = OptionMath;
+  const days = M.daySteps(c.dte);
+  const pts = M.decay(c, days);
+  const hi = Math.max(c.premium, ...pts.map(p => p.value));
+  oiDrawChart("oiDecayChart", "oiDecayTip", {
+    vb: { w: 920, h: 260 }, pad: { l: 70, r: 40, t: 22, b: 34 },
+    x0: 0, x1: c.dte, y0: 0, y1: hi,
+    xTicks: oiDayTicks(c.dte), yFmt: OI_Y.value.axis,
+    series: [{ color: "#ffd966", width: 2.2, pts: pts.map(p => [p.day, p.value]), at: (d) => M.valueAt(c, c.S, d, c.iv) }],
+    hlines: [{ y: c.premium, label: `Paid ${fmtUsd(c.premium)}`, color: "#b99a35", dash: "3 4" }],
+    snap: (x) => Math.round(x), keyXs: days,
+    tip: (d) => {
+      const v = M.valueAt(c, c.S, d, c.iv);
+      return `<div class="tt-year">${oiDate(d)} · ${c.dte - d} days left</div>` +
+        oiTipRow("#ffd966", "Option value", fmtUsd(v)) +
+        oiTipRow("transparent", "Premium remaining", fmtPctPlain(v / c.premium)) +
+        oiTipRow("transparent", "Premium lost", fmtPctPlain(1 - v / c.premium));
+    },
+  });
+  const rows = oiDecayMilestones().map(m => {
+    const v = M.valueAt(c, c.S, m.day, c.iv);
+    return `<tr><th>${m.label}<div style="font-weight:500;color:var(--text-muted);font-size:11px;letter-spacing:0">${oiDate(m.day)}</div></th>
+      <td>${c.dte - m.day}</td><td>${fmtUsd(v)}</td><td>${fmtUsd(v * 100, 0)}</td>
+      <td>${fmtPctPlain(v / c.premium)}</td><td class="${toneClass(-(1 - v / c.premium))}">${fmtPctPlain(1 - v / c.premium)}</td></tr>`;
   }).join("");
+  oiEl("oiDecayTable").innerHTML = `<thead><tr><th>Milestone</th><th>Days left</th><th>Value / share</th><th>Value / contract</th><th>Premium remaining</th><th>Premium lost</th></tr></thead><tbody>${rows}</tbody>`;
 }
 
-async function loadOptionsWatchlist() {
-  try {
-    const res = await fetch(BRIDGE + "/api/options-watchlist");
-    const j = await res.json();
-    if (!res.ok) throw new Error(j.error || ("HTTP " + res.status));
-    optionsContracts = j.contracts || [];
-    renderOptionsWatchlist();
-    await refreshOptionsQuotes();
-  } catch { /* transient failure — leave whatever was last rendered */ }
+function oiPnlDay() {
+  const c = oi.c;
+  switch (oi.pnlDate) {
+    case "today": return 0;
+    case "target": return oi.thesis.targetDay;
+    case "exp": return c.dte;
+    case "custom": return oi.pnlCustomDay != null ? oi.pnlCustomDay : oi.simDay;
+    default: return oi.simDay;
+  }
+}
+function oiRenderPnl() {
+  const c = oi.c, M = OptionMath, t = oi.thesis;
+  const day = oiPnlDay();
+  const ym = OI_Y[oi.pnlY];
+  const o = M.overview(c);
+  const marks = [oi.prices[0], oi.prices[oi.prices.length - 1], c.S, c.K, o.breakEven, t.bear, t.bull].filter(v => v > 0);
+  const lo = Math.max(0, Math.min(...marks) * 0.9), hi = Math.max(...marks) * 1.08;
+  const curve = M.byPrice(c, day, oi.ivFuture, lo, hi);
+  const exp = M.byPrice(c, c.dte, oi.ivFuture, lo, hi);
+  const series = [];
+  const dayLabel = day === c.dte ? "At expiration" : day === 0 ? "Today" : oiDate(day);
+  if (day !== c.dte) series.push({ color: "#8a8984", width: 1.6, dash: "5 4", pts: exp.map(p => [p.price, ym.get(p)]),
+    at: (S) => ym.get(oiPoint(S, c.dte, oi.ivFuture)), name: "At expiration" });
+  series.push({ color: "#ffd966", width: 2.4, pts: curve.map(p => [p.price, ym.get(p)]),
+    at: (S) => ym.get(oiPoint(S, day, oi.ivFuture)), name: dayLabel });
+  const ys = [...curve, ...exp].map(ym.get);
+  const y0 = Math.min(0, ...ys), y1 = Math.max(0, ...ys);
+  const vlines = [
+    { x: c.S, label: "Now", color: "#a9a8a1", dash: "2 3" },
+    { x: c.K, label: "Strike", color: "#78776f", dash: "2 3" },
+    { x: o.breakEven, label: "Break-even", color: "#b99a35", dash: "4 3" },
+  ];
+  for (const k of ["bear", "base", "bull"]) if (t[k] > 0) vlines.push({ x: t[k], label: k[0].toUpperCase() + k.slice(1), color: OI_THESIS_COLORS[k], dash: "4 4" });
+  const simIn = oi.simS >= lo && oi.simS <= hi;
+  oiDrawChart("oiPnlChart", "oiPnlTip", {
+    vb: { w: 920, h: 340 }, pad: { l: 74, r: 30, t: 58, b: 34 },
+    x0: lo, x1: hi, y0, y1,
+    xTicks: niceTicks(lo, hi, 8).filter(v => v >= lo && v <= hi).map(v => ({ v, label: fmtPrice(v) })),
+    yFmt: ym.axis, zeroStrong: true, series, vlines,
+    hlines: [{ y: oi.pnlY === "pnl" ? -o.maxLoss : -1, label: "Max loss", color: "#ff8f8f", dash: "3 4" }],
+    dot: simIn && (oi.pnlDate === "sim" || day === oi.simDay) ? { x: oi.simS, y: ym.get(oiPoint(oi.simS, day, oi.ivFuture)), color: "#ffd966" } : null,
+    snap: (x) => lo + Math.round((x - lo) / ((hi - lo) / 160)) * ((hi - lo) / 160),
+    keyXs: curve.map(p => p.price),
+    tip: (S) => `<div class="tt-year">Stock ${fmtUsd(S)} · ${fmtSignedPct((S - c.S) / c.S)}</div>` +
+      series.slice().reverse().map(s => oiTipRow(s.color, s.name, ym.fmt(s.at(S)))).join(""),
+  });
+  oiEl("oiPnlLegend").innerHTML =
+    `<span class="legend-item"><span class="swatch" style="background:#ffd966"></span>${dayLabel}${day !== c.dte ? ` (${c.dte - day} days left)` : ""}</span>` +
+    (day !== c.dte ? `<span class="legend-item"><span class="swatch" style="background:repeating-linear-gradient(90deg,#8a8984 0 5px,transparent 5px 9px)"></span>At expiration</span>` : "") +
+    `<span class="legend-item" style="color:var(--text-muted)">IV ${(oi.ivFuture * 100).toFixed(1)}% · per contract</span>`;
 }
 
-async function refreshOptionsQuotes() {
-  if (!optionsContracts.length) return;
-  const symbols = optionsContracts.map(c => c.contractSymbol);
-  try {
-    const res = await fetch(BRIDGE + "/api/options/quote?contracts=" + encodeURIComponent(symbols.join(",")));
-    const j = await res.json();
-    if (!res.ok) throw new Error(j.error || ("HTTP " + res.status));
-    const prevQuoteMap = optionsQuoteMap;
-    optionsQuoteMap = {};
-    (j.quotes || []).forEach(q => { optionsQuoteMap[q.ticker] = q; });
-    renderOptionsWatchlist(prevQuoteMap);
-  } catch { /* transient failure — leave whatever was last rendered */ }
+function oiRenderThesis() {
+  const c = oi.c, t = oi.thesis;
+  const when = t.targetSet ? oiDate(t.targetDay) : "expiration";
+  oiEl("oiThesisHint").textContent = t.targetSet
+    ? `Option value if the stock is at each price on ${oiDate(t.targetDay)} (${oiDaysLabel(c.dte - t.targetDay)} before expiration) · IV ${(oi.ivFuture * 100).toFixed(1)}%`
+    : `No target date set — measured at expiration (${oiDate(c.dte)})`;
+  const names = { bear: "Bear", base: "Base", bull: "Bull" };
+  const cards = ["bear", "base", "bull"].map(k => {
+    if (!(t[k] > 0)) return `<div class="calc-card oi-scn" style="--accent:${OI_THESIS_COLORS[k]}"><div class="calc-card-label calc-card-head"><span class="swatch" style="background:${OI_THESIS_COLORS[k]}"></span>${names[k]} case</div><div class="calc-card-value is-empty" style="font-size:15px;color:var(--text-muted)">Add a ${k} price above</div></div>`;
+    const pt = oiPoint(t[k], t.targetDay, oi.ivFuture);
+    const row = (a, b, cls = "") => `<div class="calc-row"><span class="k">${a}</span><span class="v ${cls}">${b}</span></div>`;
+    return `<div class="calc-card oi-scn" style="--accent:${OI_THESIS_COLORS[k]}">
+      <div class="calc-card-label calc-card-head"><span class="swatch" style="background:${OI_THESIS_COLORS[k]}"></span>${names[k]} case · stock ${fmtUsd(t[k])}</div>
+      <div class="calc-card-value ${toneClass(pt.pnl)}">${fmtSignedMoney(pt.pnl)}</div>
+      <div class="calc-card-rows">
+        ${row("Stock move", fmtSignedPct((t[k] - c.S) / c.S))}
+        ${row(`Option value at ${when}`, fmtUsd(pt.value))}
+        ${row("Return", fmtSignedPct(pt.ret), toneClass(pt.ret))}
+        ${row("Contract value", fmtUsd(pt.value * 100, 0))}
+      </div></div>`;
+  });
+  oiEl("oiThesis").innerHTML = cards.join("");
 }
 
-function stopOptionsLive() {
-  if (optionsTimer) { clearInterval(optionsTimer); optionsTimer = null; }
-}
-function startOptionsLive() {
-  stopOptionsLive();   // idempotent, same discipline as initWatchlist
-  loadOptionsWatchlist();
-  optionsTimer = setInterval(() => {
-    if (currentView !== "options" || document.visibilityState !== "visible") return;
-    refreshOptionsQuotes();
-  }, 45000);
+function oiRenderGreeks() {
+  const c = oi.c, g = oiGreeksToday();
+  const isPut = c.type === "put";
+  const pick = (k) => oi.entered[k] != null ? { v: oi.entered[k], src: "Entered", model: g ? g[k] : null } : { v: g ? g[k] : null, src: "Estimated", model: null };
+  const card = (name, k, dec, explain) => {
+    const x = pick(k);
+    const modelNote = x.model != null ? ` · model estimate ${x.model.toFixed(dec)}` : "";
+    return `<div class="calc-card oi-greek"><div class="calc-card-label">${name}</div>
+      <div class="g-val">${x.v != null ? x.v.toFixed(dec) : EMDASH}</div>
+      <div class="g-src">${x.src} · per share${modelNote}</div>
+      <p>${x.v != null ? explain(x.v) : "Not available."}</p></div>`;
+  };
+  oiEl("oiGreeks").innerHTML = [
+    card("Delta", "delta", 3, v => `If the stock ${isPut ? "falls" : "rises"} $1, the option gains about <strong>${fmtUsd(Math.abs(v) * 100, 0)}</strong> per contract, all else equal — it moves like roughly ${Math.round(Math.abs(v) * 100)} shares of stock.`),
+    card("Gamma", "gamma", 4, v => `Each $1 move in the stock shifts delta by about ${v.toFixed(4)}, so the next $1 move is worth roughly ${fmtUsd(Math.abs(v) * 100, 2)} more (or less) per contract. Gamma is why gains accelerate as the option moves in the money.`),
+    card("Theta", "theta", 3, v => `If the stock and IV don't move, the option loses about <strong>${fmtUsd(Math.abs(v) * 100, 0)}</strong> per contract per day — ${fmtPctPlain(Math.abs(v) / c.premium, 2)} of what you paid. Decay speeds up as expiration nears.`),
+    card("Vega", "vega", 3, v => `Each 1-point change in IV moves the option about <strong>${fmtUsd(Math.abs(v) * 100, 0)}</strong> per contract. A 10-point IV drop would cost roughly ${fmtUsd(Math.abs(v) * 1000, 0)}.`),
+  ].join("") + (g ? `<div class="calc-card oi-greek"><div class="calc-card-label">Rho</div><div class="g-val">${g.rho.toFixed(3)}</div><div class="g-src">Estimated · per share</div><p>A 1-point rise in interest rates changes the value by about ${fmtSignedMoney(g.rho * 100)} per contract — usually minor.</p></div>` : "");
 }
 
-document.getElementById("optionsSearchForm").addEventListener("submit", (ev) => {
-  ev.preventDefault();
-  searchOptions(document.getElementById("optionsSearchInput").value);
-});
-document.getElementById("optionsExpRow").addEventListener("click", (ev) => {
-  const btn = ev.target.closest("[data-exp]");
-  if (btn) selectOptionsExpiration(btn.dataset.exp);
-});
-document.getElementById("optionsChainGrid").addEventListener("click", (ev) => {
-  const btn = ev.target.closest("[data-add-contract]");
-  if (btn && !btn.disabled) addOptionContract(btn.dataset.addContract, btn.dataset.type);
-});
-document.getElementById("optionsWatchlistBody").addEventListener("click", (ev) => {
-  const removeBtn = ev.target.closest("[data-remove-contract]");
-  if (removeBtn) { removeOptionContract(removeBtn.dataset.removeContract); return; }
-  const row = ev.target.closest("tr[data-contract]");
-  if (row) openOptionsChart(row.dataset.contract);
-});
+function oiRenderInsights(f) {
+  const c = oi.c, ov = f.overview, isPut = c.type === "put";
+  const cards = [];
+  const card = (title, body) => `<div class="calc-card oi-insight"><h4>${title}</h4>${body}</div>`;
+  cards.push(card("Break-even requirement",
+    `<p>The stock needs to ${isPut ? "fall" : "rise"} <strong>${Math.abs(ov.requiredMovePct).toFixed(1)}%</strong> — from ${fmtUsd(c.S)} to <strong>${fmtUsd(ov.breakEven)}</strong> — by expiration (${oiDate(c.dte)}) just to break even. Before expiration, break-even is lower thanks to time value left in the option.</p>`));
+  const g = f.greeksPerContract;
+  const d30 = f.timeDecay.milestones.find(m => m.day === 30);
+  cards.push(card("Time decay",
+    `<p>Theta is about <strong>${fmtSignedMoney(g.thetaPerDay)}</strong> per contract per day — <strong>${g.thetaPctOfPremiumPerDay != null ? g.thetaPctOfPremiumPerDay.toFixed(2) : EMDASH}%</strong> of the premium daily. With the stock and IV unchanged,
+      ${d30 ? `the option would be worth ${fmtUsd(d30.value)} in 30 days (${fmtPctPlain(d30.remaining)} of what you paid) and` : "it would be worth"}
+      ${fmtUsd(f.timeDecay.milestones[f.timeDecay.milestones.length - 1].value)} at expiration.</p>`));
+  if (oi.thesis.base > 0) {
+    const cushion = isPut ? ov.breakEven - oi.thesis.base : oi.thesis.base - ov.breakEven;
+    cards.push(card("Base target vs break-even",
+      cushion >= 0
+        ? `<p>Your base target of <strong>${fmtUsd(oi.thesis.base)}</strong> is <strong>${fmtUsd(cushion)}</strong> (${fmtPctPlain(cushion / ov.breakEven)}) ${isPut ? "below" : "above"} the ${fmtUsd(ov.breakEven)} break-even — a cushion if it's right at expiration.</p>`
+        : `<p>Your base target of <strong>${fmtUsd(oi.thesis.base)}</strong> falls <strong>${fmtUsd(-cushion)}</strong> short of the ${fmtUsd(ov.breakEven)} break-even. Even if the stock lands exactly there, the option loses money if held to expiration.</p>`));
+  }
+  const iv = f.ivRisk;
+  cards.push(card("IV risk",
+    `<p>If IV moves from ${iv.fromIvPct}% to <strong>${iv.toIvPct}%</strong>, the option with the stock at ${fmtUsd(iv.stockPrice)} on ${oiDate(iv.daysFromToday)} would be worth <strong>${fmtUsd(iv.valueFrom)} → ${fmtUsd(iv.valueTo)}</strong> per share (<span class="${toneClass(iv.perContractChange)}">${fmtSignedMoney(iv.perContractChange)}</span> per contract).
+      ${iv.tenPointDropShareOfPremiumPct != null ? ` Today a 10-point IV drop is worth about ${iv.tenPointDropShareOfPremiumPct}% of the premium.` : ""}</p>`));
+  if (f.timeSensitivity) {
+    const ts = f.timeSensitivity;
+    const rows = ts.outcomes.map(o => `<tr><td>Reach ${fmtUsd(ts.stockPrice)} ${o.label}</td><td class="${toneClass(o.ret)}">${fmtSignedPct(o.ret)}</td></tr>`).join("");
+    const first = ts.outcomes[0], last = ts.outcomes[ts.outcomes.length - 1];
+    cards.push(card("Time sensitivity — not only where, but when",
+      `<p>Same stock price, different timing. ${ts.outcomes.length > 1 ? `Getting to ${fmtUsd(ts.stockPrice)} ${first.label} returns <strong>${fmtSignedPct(first.ret)}</strong>; getting there ${last.label} returns <strong>${fmtSignedPct(last.ret)}</strong>.` : ""}</p><table>${rows}</table>`));
+  }
+  if (f.liquidity) {
+    const l = f.liquidity, parts = [];
+    if (l.spread != null) parts.push(`Bid/ask ${fmtUsd(l.bid)} / ${fmtUsd(l.ask)} — spread ${fmtUsd(l.spread)} (${l.spreadPctOfMid != null ? fmtPctPlain(l.spreadPctOfMid) : EMDASH} of mid). ${l.spreadPctOfMid > 0.1 ? "<strong>Wide spread:</strong> getting in and out costs a meaningful slice of the premium." : ""}`);
+    if (l.openInterest != null) parts.push(`Open interest ${l.openInterest.toLocaleString("en-US")}${l.openInterest < 100 ? " — <strong>thin</strong>; fills may be harder." : "."}`);
+    if (l.volume != null) parts.push(`Volume ${l.volume.toLocaleString("en-US")}${l.volume < 10 ? " — <strong>little trading today</strong>." : "."}`);
+    cards.push(card("Liquidity", `<p>${parts.join(" ")}</p>`));
+  }
+  oiEl("oiInsights").innerHTML = cards.join("");
+}
+
+function oiGeneralSummary(f) {
+  const c = oi.c, ov = f.overview, isPut = c.type === "put", s = [];
+  s.push(`This ${c.ticker} ${fmtPrice(c.K)} ${c.type} costs ${fmtUsd(f.contract.contractCost, 0)} per contract and expires in ${oiDaysLabel(c.dte)} (${oiDate(c.dte)}).`);
+  s.push(`It needs the stock to ${isPut ? "fall" : "rise"} ${Math.abs(ov.requiredMovePct).toFixed(1)}% to ${fmtUsd(ov.breakEven)} by expiration to break even.`);
+  if (f.greeksPerContract.thetaPerDay != null) s.push(`If nothing changes it loses about ${fmtUsd(Math.abs(f.greeksPerContract.thetaPerDay), 0)} a day to time decay (${f.greeksPerContract.thetaPctOfPremiumPerDay.toFixed(2)}% of the premium).`);
+  const b = f.thesis.scenarios.base;
+  if (b) {
+    const when = f.thesis.targetDateEntered ? `by ${oiDate(f.thesis.daysFromToday)}` : "at expiration";
+    s.push(`If your base case of ${fmtUsd(b.stock)} plays out ${when}, the model puts the option at ${fmtUsd(b.value)} — ${b.pnl >= 0 ? "a gain of" : "a loss of"} ${fmtUsd(Math.abs(b.pnl), 0)} (${fmtSignedPct(b.ret)}).`);
+  }
+  if (f.timeSensitivity && f.timeSensitivity.outcomes.length > 1) {
+    const o = f.timeSensitivity.outcomes;
+    s.push(`Timing matters: reaching ${fmtUsd(f.timeSensitivity.stockPrice)} ${o[0].label} returns ${fmtSignedPct(o[0].ret)}, versus ${fmtSignedPct(o[o.length - 1].ret)} ${o[o.length - 1].label}.`);
+  }
+  s.push(`A move in IV from ${f.ivRisk.fromIvPct}% to ${f.ivRisk.toIvPct}% would change that ${f.thesis.scenarios.base ? "base-case " : ""}value from ${fmtUsd(f.ivRisk.valueFrom)} to ${fmtUsd(f.ivRisk.valueTo)}.`);
+  s.push(`The most you can lose is the full ${fmtUsd(ov.maxLoss, 0)} premium (100%).`);
+  return s.join(" ");
+}
+function oiRenderGeneral(f) {
+  const cat = f.categories, T = INSIGHT_THRESHOLDS;
+  const tone = { Low: "good", Moderate: "mid", High: "bad", Strong: "good", Weak: "bad", Misaligned: "bad" };
+  const items = [
+    { k: "Break-even requirement", v: cat.breakEvenRequirement, why: `${Math.abs(f.overview.requiredMovePct).toFixed(1)}% move needed (Low < ${T.breakEven.low * 100}%, High ≥ ${T.breakEven.moderate * 100}%)` },
+    { k: "Time decay", v: cat.timeDecay, why: f.greeksPerContract.thetaPctOfPremiumPerDay != null ? `${f.greeksPerContract.thetaPctOfPremiumPerDay.toFixed(2)}% of premium per day (Low < ${T.timeDecay.low * 100}%, High ≥ ${T.timeDecay.moderate * 100}%)` : "" },
+    { k: "IV risk", v: cat.ivRisk, why: f.ivRisk.tenPointDropShareOfPremiumPct != null ? `10-pt IV drop ≈ ${f.ivRisk.tenPointDropShareOfPremiumPct}% of premium (Low < ${T.ivRisk.low * 100}%, High ≥ ${T.ivRisk.moderate * 100}%)` : "" },
+    { k: "Thesis fit", v: cat.thesisFit, why: f.thesis.scenarios.base ? (cat.thesisFit === "Misaligned" ? `base target is on the wrong side for a ${oi.c.type}` : `base case returns ${fmtSignedPct(f.thesis.scenarios.base.ret)} (Strong ≥ ${T.thesisFit.strong * 100}%)`) : "add a base price" },
+    { k: "Upside leverage", v: cat.upsideLeverage, why: f.leverage ? `${f.leverage.optionReturnPerStockMove}× the stock's ${f.leverage.scenario}-case move (High ≥ ${T.leverage.high}×)` : `add a ${oi.c.type === "put" ? "bear" : "bull"} price` },
+  ];
+  oiEl("oiCats").innerHTML = items.map(i => `<div class="oi-cat tone-${i.v ? (i.k === "Upside leverage" ? (i.v === "High" ? "good" : "mid") : tone[i.v]) : "mid"}">
+    <div class="k">${i.k}</div><div class="v"><span class="dot"></span>${i.v || EMDASH}</div><div class="why">${i.why}</div></div>`).join("");
+  oiEl("oiSummary").textContent = oiGeneralSummary(f);
+}
+
+/* ── Wiring (once) ───────────────────────────────────────────────────── */
+function oiBindOnce() {
+  if (oiBound) return;
+  oiBound = true;
+  oiEl("oiForm").addEventListener("submit", (e) => { e.preventDefault(); oiAnalyze(); });
+  oiEl("oiType").addEventListener("click", (e) => { const b = e.target.closest("button[data-type]"); if (b) oiSetType(b.dataset.type); });
+  oiEl("oiExample").addEventListener("click", () => { oiWriteRaw(oiExampleRaw()); oiAnalyze(); });
+  oiEl("oiReset").addEventListener("click", () => {
+    oiWriteRaw({ type: "call" });
+    oiShowErrors([]);
+    oi = null;
+    oiEl("oiResults").hidden = true;
+    try { localStorage.removeItem(OI_KEY); } catch { /* private mode */ }
+  });
+  oiEl("oiLive").addEventListener("click", async () => {
+    const t = oiEl("oiF_ticker").value.trim().toUpperCase();
+    const btn = oiEl("oiLive");
+    if (!/^[A-Z0-9.\-^=]{1,12}$/.test(t)) { oiShowErrors([{ field: "ticker", msg: "Enter a valid ticker symbol to fetch its stock price." }]); return; }
+    btn.disabled = true;
+    try {
+      const res = await fetch(BRIDGE + "/api/watchlist?tickers=" + encodeURIComponent(t));
+      const q = ((await res.json()).quotes || [])[0];
+      if (!q || q.error || !(q.price > 0)) throw new Error("no quote");
+      oiEl("oiF_S").value = q.price.toFixed(2);
+      oiShowErrors([]);
+    } catch { oiShowErrors([{ field: "S", msg: `Couldn't get a stock price for ${t} — enter it manually.` }]); }
+    finally { btn.disabled = false; }
+  });
+  oiEl("oiIv").addEventListener("input", (e) => { if (!oi) return; oi.ivFuture = +e.target.value / 100; oiSchedule(); });
+  const setSimS = (v, fromNum) => {
+    if (!oi || !(v > 0)) return;
+    oi.simS = v;
+    if (!fromNum) oiEl("oiSimPriceNum").value = v.toFixed(2);
+    else oiEl("oiSimPrice").value = v;
+    oiSchedule();
+  };
+  oiEl("oiSimPrice").addEventListener("input", (e) => setSimS(+e.target.value, false));
+  oiEl("oiSimPriceNum").addEventListener("input", (e) => { const v = oiNum(e.target.value); setSimS(v, true); });
+  oiEl("oiSimDay").addEventListener("input", (e) => { if (!oi) return; oi.simDay = +e.target.value; oiSchedule(); });
+  oiEl("oiYSeg").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-y]"); if (!b || !oi) return;
+    oi.yMode = b.dataset.y; oiSetSeg("oiYSeg", "y", oi.yMode); oiSchedule();
+  });
+  oiEl("oiPnlYSeg").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-y]"); if (!b || !oi) return;
+    oi.pnlY = b.dataset.y; oiSetSeg("oiPnlYSeg", "y", oi.pnlY); oiSchedule();
+  });
+  oiEl("oiPnlDateSeg").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-d]"); if (!b || !oi) return;
+    oi.pnlDate = b.dataset.d; oiSetSeg("oiPnlDateSeg", "d", oi.pnlDate); oiEl("oiPnlCustom").value = ""; oiSchedule();
+  });
+  oiEl("oiPnlCustom").addEventListener("change", (e) => {
+    if (!oi || !e.target.value) return;
+    const d = OptionMath.daysBetween(oi.c.today, e.target.value);
+    oi.pnlCustomDay = Math.max(0, Math.min(oi.c.dte, d));
+    oi.pnlDate = "custom"; oiSetSeg("oiPnlDateSeg", "d", "custom"); oiSchedule();
+  });
+  oiEl("oiPriceChips").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-rm]"); if (!b || !oi) return;
+    oi.prices = oi.prices.filter(p => p !== +b.dataset.rm);
+    oiRenderPriceChips(); oiSchedule();
+  });
+  oiEl("oiPriceChips").addEventListener("submit", (e) => {
+    e.preventDefault();
+    if (!oi) return;
+    const v = oiNum(oiEl("oiChipInput").value);
+    if (!(v > 0) || oi.prices.includes(+v.toFixed(2)) || oi.prices.length >= OI_MAX_PRICES) { oiEl("oiChipInput").classList.add("is-invalid"); return; }
+    oi.prices = [...oi.prices, +v.toFixed(2)].sort((a, b) => a - b);
+    oiRenderPriceChips(); oiSchedule();
+    const inp = oiEl("oiChipInput"); if (inp) inp.focus();
+  });
+}
+
+function renderOptionInsight() {
+  const first = !oiBound;
+  oiBindOnce();
+  oiEl("oiLive").hidden = !bridgeUp;
+  if (first) {
+    const saved = oiLoadRaw();
+    if (saved) { oiWriteRaw(saved); oiAnalyze({ scroll: false, quiet: true }); }
+  } else if (oi) oiSchedule();
+}
+
 
 let watchlistChartTicker = null;
 let watchlistChartRange = "3mo";
@@ -4794,15 +5938,7 @@ let watchlistSelStart = null;
 let watchlistSelEnd = null;
 let watchlistDragging = false;
 
-// "stock" charts any plain ticker via /api/watchlist/history (benchmark
-// overlay + company snapshot available); "option" charts one tracked
-// contract via /api/options/history (neither applies — hidden in that mode).
-// watchlistChartTicker doubles as "the symbol currently charted" in both
-// modes, so loadWatchlistChart() below stays a single shared function.
-let watchlistChartMode = "stock";
-
 function openWatchlistChart(ticker) {
-  watchlistChartMode = "stock";
   watchlistChartTicker = ticker;
   watchlistChartRange = "3mo";
   watchlistBenchmarkOn = false;
@@ -4837,30 +5973,6 @@ function openTickerLookup(raw) {
   openWatchlistChart(ticker);
 }
 
-// Opens the same chart modal for one tracked option contract instead of a
-// stock ticker — added to the watchlist happens from the chain table, not
-// from this modal, so the "+ Watchlist" button and the benchmark/snapshot
-// chrome (neither means anything for a single contract) stay hidden here.
-function openOptionsChart(contractSymbol) {
-  const c = optionsContracts.find(x => x.contractSymbol === contractSymbol);
-  watchlistChartMode = "option";
-  watchlistChartTicker = contractSymbol;
-  watchlistChartRange = "3mo";
-  watchlistBenchmarkOn = false;
-  document.getElementById("watchlistChartTitle").textContent =
-    c ? `${optionContractLabel(c)} · exp ${c.expiration}` : contractSymbol;
-  document.getElementById("watchlistChartMeta").innerHTML = watchlistChangeHtml(optionsQuoteMap[contractSymbol] || {});
-  updateWatchlistRangeButtons();
-  document.querySelector(".watchlist-benchmark-row").hidden = true;
-  const snapshotGrid = document.getElementById("watchlistSnapshotGrid");
-  snapshotGrid.hidden = true;
-  snapshotGrid.innerHTML = "";
-  document.getElementById("btnWatchlistModalAdd").hidden = true;
-  document.getElementById("watchlistPeSection").hidden = true;   // P/E doesn't apply to an option contract
-  openModalEl(document.getElementById("watchlistChartModal"));
-  loadWatchlistChart();
-}
-
 function updateWatchlistRangeButtons() {
   document.querySelectorAll("#watchlistRangeRow [data-range]").forEach(b => {
     const active = b.dataset.range === watchlistChartRange;
@@ -4870,18 +5982,16 @@ function updateWatchlistRangeButtons() {
 }
 
 async function loadWatchlistChart() {
-  const mode = watchlistChartMode, symbol = watchlistChartTicker, range = watchlistChartRange;
-  const wantBenchmark = mode === "stock" && watchlistBenchmarkOn;
-  const isStale = () => mode !== watchlistChartMode || symbol !== watchlistChartTicker
-    || range !== watchlistChartRange || wantBenchmark !== (watchlistChartMode === "stock" && watchlistBenchmarkOn);
+  const symbol = watchlistChartTicker, range = watchlistChartRange;
+  const wantBenchmark = watchlistBenchmarkOn;
+  const isStale = () => symbol !== watchlistChartTicker
+    || range !== watchlistChartRange || wantBenchmark !== watchlistBenchmarkOn;
   const statusEl = document.getElementById("watchlistChartStatus");
   statusEl.textContent = "Loading price history…";
   statusEl.className = "watchlist-chart-status";
   renderWatchlistChart([], range, null);
   try {
-    let url = mode === "option"
-      ? BRIDGE + "/api/options/history?contract=" + encodeURIComponent(symbol) + "&range=" + encodeURIComponent(range)
-      : BRIDGE + "/api/watchlist/history?ticker=" + encodeURIComponent(symbol) + "&range=" + encodeURIComponent(range);
+    let url = BRIDGE + "/api/watchlist/history?ticker=" + encodeURIComponent(symbol) + "&range=" + encodeURIComponent(range);
     if (wantBenchmark) url += "&benchmark=1";
     const res = await fetch(url);
     const j = await res.json();
@@ -4893,11 +6003,7 @@ async function loadWatchlistChart() {
     statusEl.textContent = "";
   } catch (e) {
     if (isStale()) return;
-    // An option contract's history disappears once it expires — Yahoo drops
-    // the series entirely, so this is the expected error shape for it, not
-    // a bug; the extra hint only applies in that mode.
-    statusEl.textContent = "Couldn't load a chart — " + String(e.message || e)
-      + (mode === "option" ? " (this happens once a contract expires)" : "");
+    statusEl.textContent = "Couldn't load a chart — " + String(e.message || e);
     statusEl.className = "watchlist-chart-status err";
   }
 }
@@ -7575,7 +8681,7 @@ const VIEWS = {
     swatch: "linear-gradient(145deg,#4fcf9f,#0d6b4c)", fg: "#04140e" },
   portfolio:  { mark: "PF", title: "Portfolio Tracker",   sub: "Track and aggregate your positions",
     swatch: "linear-gradient(145deg,#6fa8e5,#2c5cb5)", fg: "#f5f5f2" },
-  options:    { mark: "OP", title: "Options Watchlist",   sub: "Search chains, track contracts, chart performance",
+  options:    { mark: "OI", title: "Option Insight",      sub: "Value, return and time decay of an option you enter",
     swatch: "linear-gradient(145deg,#d98fe0,#8a3fa0)", fg: "#1c0d20" },
 };
 let currentView = "projection";
@@ -7618,8 +8724,7 @@ function setView(v) {
     // fetch now rather than leaving the KPIs blind for up to HOME_POLL_MS.
     if (bridgeUp) refreshHomeQuotes();
   } else stopHomeLive();
-  // Same idea for the options-watchlist poll — only while that view is on screen.
-  if (v === "options") { renderOptionsWatchlist(); startOptionsLive(); } else stopOptionsLive();
+  if (v === "options") renderOptionInsight();
 }
 
 function closeProductMenu() {
